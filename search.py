@@ -1,6 +1,7 @@
 import sqlite3
 import sqlite_vec
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
 
 db = sqlite3.connect("database.sqlite")
@@ -8,8 +9,9 @@ db.enable_load_extension(True)
 sqlite_vec.load(db)
 cursor = db.cursor()
 
-model = SentenceTransformer("BAAI/bge-base-en-v1.5")
-query = "electronic dance music that is reminiscent of childhood"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+model = SentenceTransformer("BAAI/bge-base-en-v1.5", device=device)
+query = "Brazilian pop masterpiece"
 query_embedded = model.encode(query, convert_to_numpy=True, normalize_embeddings=True)
 neighbour_count = 8
 
