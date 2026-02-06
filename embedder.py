@@ -26,11 +26,11 @@ cursor.execute("""
     CREATE VIRTUAL TABLE reviews_vec USING vec0(embedding float[768])
 """)
 
-cursor.execute("SELECT DISTINCT reviewid, content FROM content")
+cursor.execute("SELECT DISTINCT reviewid, content, tags FROM content WHERE tags IS NOT NULL")
 rows = cursor.fetchall()
 
 vectors = model.encode(
-    [rows[i][1] for i in range(len(rows))],
+    [str(rows[i][2]) + "\n" + str(rows[i][1]) for i in range(len(rows))],
     batch_size=256,
     convert_to_numpy=True,
     show_progress_bar=True,
