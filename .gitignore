@@ -1,2 +1,5 @@
 venv/
 database.sqlite
+archive.zip
+archive_24k.zip
+temp.py
