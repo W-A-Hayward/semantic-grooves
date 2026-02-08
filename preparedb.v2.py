@@ -18,7 +18,7 @@ async def get_tags(client, text):
     """Fetches tags for a specific text segment."""
     prompt = (
         "Summarize the music review segment below. "
-        "Return ONLY a comma-separated list of: Emotions, Feelings, Instruments, and effects. "
+        "Return ONLY a comma-separated list of: Emotions, Feelings, Instruments, Genres and effects. "
         f"Review segment: {text}"
     )
     try:
