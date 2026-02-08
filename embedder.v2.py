@@ -6,7 +6,7 @@ from sentence_transformers import SentenceTransformer
 
 # --- Configuration ---
 DB_PATH = "database.sqlite"
-MODEL_NAME = "BAAI/bge-base-en-v1.5"
+MODEL_NAME = "BAAI/bge-large-en-v1.5"
 BATCH_SIZE = 128  # Optimized for 6800 XT VRAM
 CHUNK_LIMIT = 1200
 
@@ -22,9 +22,12 @@ device = "cuda" if torch.cuda.is_available() else "cpu"
 model = SentenceTransformer(MODEL_NAME, device=device)
 
 # --- Table Initialization ---
+cursor.execute("""DROP TABLE IF EXISTS reviews_vec""")
+cursor.execute("""DROP TABLE IF EXISTS review_text_fts""")
+db.commit()
 cursor.execute("""
-    CREATE VIRTUAL TABLE IF NOT EXISTS reviews_vec USING vec0(
-        embedding float[768]
+    CREATE VIRTUAL TABLE reviews_vec USING vec0(
+        embedding float[1024]
     )
 """)
 
@@ -76,4 +79,19 @@ except Exception as e:
     print(f"Error during insertion: {e}")
     db.rollback()
 finally:
+# Clear existing table 
+    cursor.execute("""
+                   CREATE VIRTUAL TABLE IF NOT EXISTS review_text_fts USING fts5(
+                        tags, 
+                        chunk, 
+                        content='review_tags', 
+                        content_rowid='rowid'
+                    );
+                   """)
+    cursor.execute("""
+                    INSERT INTO review_text_fts(rowid, tags, chunk) 
+                    SELECT rowid, tags, chunk FROM review_tags;
+                   """)
+
+    db.commit()
     db.close()
