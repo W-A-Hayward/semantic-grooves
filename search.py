@@ -10,7 +10,7 @@ sqlite_vec.load(db)
 cursor = db.cursor()
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-model = SentenceTransformer("BAAI/bge-base-en-v1.5", device=device)
+model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
 usr_query = input("Enter a query for an album you'd like, focus on the emotions : \n")
 while True:
     try:
@@ -49,7 +49,7 @@ def hybrid_search(query_text, query_vector, top_n=10, k=60):
     sorted_ids = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
     return sorted_ids
 
-sorted_ids = hybrid_search(usr_query, query_embedded)
+sorted_ids = hybrid_search(usr_query, query_embedded, top_n=20, k=20)
 print(sorted_ids)
 
 placeholders = ', '.join(['?'] * len(sorted_ids))
