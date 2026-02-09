@@ -8,7 +8,7 @@ import time
 from ollama import AsyncClient
 
 # Database & Model Config
-DB_PATH = '../database.sqlite'
+DB_PATH = '../db/database.sqlite'
 MODEL_NAME = "qwen2.5:7b"
 BATCH_SIZE = 10 
 CHUNK_SIZE = 1200
