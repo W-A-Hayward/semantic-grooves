@@ -137,7 +137,7 @@ export default function App() {
               className="font-mono text-3xl sm:text-5xl font-bold tracking-tight mb-4 text-balance"
               style={{ color: "var(--seashell)" }}
             >
-              dig the crate.
+              semantic grooves.
             </h1>
             <p
               className="font-mono text-sm sm:text-base max-w-lg mx-auto leading-relaxed"

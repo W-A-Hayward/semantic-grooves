@@ -112,25 +112,42 @@ music-discovery/
 │   ├── preparedb.v2.py             # Generates AI tags using Ollama (async batch processing)
 │   └── search.py                   # Standalone search script (CLI)
 │
-├── frontend/                       # React + TypeScript frontend
+├── frontend/                       # React + TypeScript frontend (Vite)
 │   ├── src/
 │   │   ├── App.tsx                # Main application component
 │   │   ├── main.tsx               # React entry point
+│   │   ├── globals.css            # Global styles and CSS variables
 │   │   ├── components/            # UI components
 │   │   │   ├── search-bar.tsx     # Search input component
 │   │   │   ├── result-card.tsx    # Individual result display
 │   │   │   ├── vinyl-spinner.tsx  # Loading animation
-│   │   │   └── ...                # Other UI components
+│   │   │   ├── waveform.tsx       # Waveform visualization
+│   │   │   ├── equalizer-bars.tsx # Equalizer animation
+│   │   │   ├── marquee-ticker.tsx # Marquee text component
+│   │   │   ├── stats-bar.tsx      # Search statistics display
+│   │   │   ├── score-ring.tsx     # Score visualization
+│   │   │   └── ui/                # shadcn/ui component library
+│   │   │       └── ...            # 40+ reusable UI components
+│   │   ├── hooks/                 # React hooks
+│   │   │   ├── use-mobile.tsx     # Mobile detection hook
+│   │   │   └── use-toast.ts       # Toast notification hook
 │   │   └── lib/
 │   │       ├── api.ts             # API client for backend
-│   │       └── utils.ts            # Utility functions
+│   │       ├── mock-data.ts       # Type definitions and mock data
+│   │       └── utils.ts            # Utility functions (cn helper)
+│   ├── public/                    # Static assets
+│   ├── index.html                 # HTML entry point
 │   ├── package.json               # Frontend dependencies
-│   ├── vite.config.ts             # Vite configuration
-│   └── tailwind.config.ts         # Tailwind CSS configuration
+│   ├── vite.config.ts             # Vite configuration with API proxy
+│   ├── tailwind.config.ts         # Tailwind CSS configuration
+│   ├── tsconfig.json              # TypeScript configuration
+│   ├── postcss.config.mjs         # PostCSS configuration
+│   └── components.json            # shadcn/ui configuration
 │
-└── v1/                            # Legacy scripts (deprecated)
-    ├── embedder.py
-    └── preparedb.py
+├── v1/                            # Legacy scripts (deprecated)
+│   ├── embedder.py
+│   └── preparedb.py
+└── .gitignore                     # Git ignore rules
 ```
 
 ### Data Flow
@@ -157,10 +174,10 @@ music-discovery/
    - Top results returned with metadata
 
 4. **Frontend Display** (`frontend/src/App.tsx`):
-   - Sends search query to API
-   - Displays results in a 2-column grid
-   - Shows relevance scores, tags, and review metadata
-   - Provides links to original Pitchfork reviews
+   - Sends search query to API via `/api/search` endpoint
+   - Displays results in a responsive 2-column grid layout
+   - Shows relevance scores (RRF scores), tags, and review metadata
+   - Provides clickable links to original Pitchfork reviews
 
 ## Usage
 
