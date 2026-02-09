@@ -21,17 +21,43 @@ This project enables semantic search over music reviews by:
 
 ## Usage
 
-- `embedder.py` - Generate embeddings and populate the vector table
-- `search.py` - Perform semantic search queries
-- `preparedb.v2.py` - Generate tags for reviews using Ollama (async batch processing)
+### Backend Scripts
+
+- `search_engine/embedder.v2.py` - Generate embeddings and populate the vector table
+- `search_engine/search.py` - Perform semantic search queries
+- `search_engine/preparedb.v2.py` - Generate tags for reviews using Ollama (async batch processing)
+
+### Web Application
+
+1. **Start the API server:**
+   ```bash
+   python api.py
+   ```
+   The API will run on `http://localhost:5000`
+
+2. **Start the frontend:**
+   ```bash
+   cd frontend
+   npm install
+   npm run dev
+   ```
+   The frontend will run on `http://localhost:3000`
+
+The frontend provides an elegant web interface for searching music reviews using natural language queries.
 
 ## Requirements
 
+### Backend
 - Python 3.x
 - SQLite with `sqlite_vec` extension
 - Sentence Transformers
 - Ollama (for tag generation)
 - PyTorch (with CUDA/ROCm support optional)
+- Flask and Flask-CORS (see `requirements-api.txt`)
+
+### Frontend
+- Node.js 18+ and npm
+- React 18+
 
 ## Todo
 
@@ -39,4 +65,5 @@ This project enables semantic search over music reviews by:
 - [x] Implement a search function that takes an input and returns the k nearest neighbours
 - [x] Add tags for each review using ollama model to improve accuracy
 - [ ] Chunk reviews into smaller chunks to further improve accuracy
+
 

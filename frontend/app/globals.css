@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}
+
+@layer base {
+  :root {
+    /* Warm terracotta palette */
+    --background: 12 8% 10%;
+    --foreground: 11 23% 90%;
+    --card: 12 8% 13%;
+    --card-foreground: 11 23% 90%;
+    --popover: 12 8% 13%;
+    --popover-foreground: 11 23% 90%;
+    --primary: 16 48% 56%;
+    --primary-foreground: 12 8% 10%;
+    --secondary: 12 8% 18%;
+    --secondary-foreground: 11 23% 85%;
+    --muted: 12 8% 16%;
+    --muted-foreground: 5 14% 65%;
+    --accent: 16 48% 56%;
+    --accent-foreground: 12 8% 10%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 12 8% 20%;
+    --input: 12 8% 18%;
+    --ring: 16 48% 56%;
+    --chart-1: 16 48% 56%;
+    --chart-2: 5 14% 65%;
+    --chart-3: 24 50% 58%;
+    --chart-4: 11 23% 85%;
+    --chart-5: 16 36% 54%;
+    --radius: 0.5rem;
+
+    /* Custom palette tokens */
+    --seashell: #eee2df;
+    --powder-petal: #eed7c5;
+    --rosy-taupe: #c89f9c;
+    --burnt-peach: #c97c5d;
+    --terracotta-clay: #b36a5e;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(12 8% 10%);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--terracotta-clay);
+  border-radius: 3px;
+}
+
+/* Equalizer animation */
+@keyframes eq-bar {
+  0%, 100% { height: 4px; }
+  50% { height: var(--eq-height, 20px); }
+}
+
+/* Vinyl spin */
+@keyframes vinyl-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Fade in up */
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Waveform pulse */
+@keyframes waveform-pulse {
+  0%, 100% { opacity: 0.3; transform: scaleY(0.5); }
+  50% { opacity: 1; transform: scaleY(1); }
+}
+
+/* Marquee scroll */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+/* Score ring fill */
+@keyframes score-fill {
+  from { stroke-dashoffset: 251.2; }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.6s ease-out forwards;
+}
+
+.animate-vinyl-spin {
+  animation: vinyl-spin 3s linear infinite;
+}
+
+.animate-marquee {
+  animation: marquee 25s linear infinite;
+}

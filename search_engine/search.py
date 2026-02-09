@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 
-db = sqlite3.connect("database.sqlite")
+db = sqlite3.connect("../database.sqlite")
 db.enable_load_extension(True)
 sqlite_vec.load(db)
 cursor = db.cursor()
