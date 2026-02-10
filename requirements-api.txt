@@ -4,5 +4,6 @@ sqlite-vec==0.1.6
 sentence-transformers==2.2.2
 torch>=2.0.0
 numpy>=1.24.0
-
+python-dotenv>=1.0.0
+libsql-client>=0.1.0
 
