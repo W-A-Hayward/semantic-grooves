@@ -1,75 +1,80 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import sqlite3
-import sqlite_vec
+from sqlite_vec import serialize_float32
 import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 import os
+from dotenv import load_dotenv
 import re
+from libsql_client import create_client_sync
 
 app = Flask(__name__)
 CORS(app)
+load_dotenv()
 
 # Initialize model and database connection
 device = "cuda" if torch.cuda.is_available() else "cpu"
 model = SentenceTransformer("BAAI/bge-large-en-v1.5", device=device)
-DB_PATH = os.path.join(os.path.dirname(__file__), "database.sqlite")
+url = os.getenv("TURSO_DATABASE_URL")
+auth_token = os.getenv("TURSO_AUTH_TOKEN")
+huggingface_token = os.getenv("HUGGINGFACE_TOKEN")
+if not url or not auth_token:
+    print(url, "\n", auth_token)
+    exit(1)
+client = create_client_sync(url, auth_token=auth_token)
 
-def get_db_connection():
-    """Create a new database connection for each request."""
-    db = sqlite3.connect(DB_PATH)
-    db.enable_load_extension(True)
-    sqlite_vec.load(db)
-    return db
+import requests
 
-def hybrid_search(cursor, query_text, query_vector, top_n=10, k=60):
-    """Perform hybrid search combining vector and lexical search."""
-    # 1. Get Vector Results (Ranked by distance)
-    vec_results = cursor.execute("""
-        SELECT rowid FROM reviews_vec 
-        WHERE embedding MATCH ? AND k = 50 
-        ORDER BY distance
-    """, (query_vector.tobytes(),)).fetchall()
+def get_embedding(text):
+    api_url = "https://api-inference.huggingface.co/models/mixedbread-ai/mxbai-embed-large-v1"
+    headers = {"Authorization": f"Bearer {huggingface_token}"}
+    payload = {
+        "inputs": text,
+        "parameters": {
+            "normalize": True
+        }
+    }
+    response = requests.post(api_url, headers=headers, json=payload)
+    return response.json() 
+
+def hybrid_search(client, query_text, query_vector, top_n=10, k=60):
+    # 1. Vector Search using Turso Native Index
+    # Note: Turso returns 'id' and 'distance'
+    vec_query = """
+        SELECT id, distance 
+        FROM vector_top_k('movies_idx', ?, 50)
+    """
+    # Serialize the numpy array to the float32 blob format Turso expects
+    vec_results = client.execute(vec_query, [serialize_float32(query_vector)]).rows
     
-    # 2. Get Lexical Results (Ranked by BM25 score)
-    # Sanitize FTS5 query to prevent syntax errors
-    # FTS5 interprets "column:value" as column filters, so we need to escape colons
-    # Also escape other FTS5 special characters
-    fts_query = query_text.strip()
-    if not fts_query:
-        fts_results = []
-    else:
-        # Replace colons and other special FTS5 operators that might cause issues
-        # Replace "word:word" patterns (which FTS5 interprets as column:value)
-        fts_query = re.sub(r'(\w+):(\w+)', r'\1 \2', fts_query)
-        # Escape remaining special FTS5 characters
-        fts_query = fts_query.replace('"', ' ').replace("'", ' ')
-        # Clean up multiple spaces
-        fts_query = ' '.join(fts_query.split())
-        
+    # 2. Lexical Search (FTS5 is supported in Turso)
+    fts_results = []
+    if query_text.strip():
+        # Sanitize query (keep your existing regex/logic)
+        fts_query = re.sub(r'(\w+):(\w+)', r'\1 \2', query_text).replace('"', ' ')
         try:
-            fts_results = cursor.execute("""
+            fts_res = client.execute("""
                 SELECT rowid FROM review_text_fts 
                 WHERE review_text_fts MATCH ? 
-                ORDER BY rank LIMIT 50
-            """, (fts_query,)).fetchall()
-        except sqlite3.OperationalError as e:
-            # If FTS5 query fails, skip FTS search and log the error
-            print(f"FTS5 query error: {e}, query: {fts_query}")
-            fts_results = []
-    
-    # 3. Combine using RRF
+                LIMIT 50
+            """, [fts_query])
+            fts_results = fts_res.rows
+        except Exception as e:
+            print(f"FTS error: {e}")
+
+    # 3. RRF Combination
     scores = {}
-    
-    for rank, (rowid,) in enumerate(vec_results):
+    for rank, row in enumerate(vec_results):
+        rowid = row[0]
         scores[rowid] = scores.get(rowid, 0) + 1.0 / (k + rank + 1)
         
-    for rank, (rowid,) in enumerate(fts_results):
+    for rank, row in enumerate(fts_results):
+        rowid = row[0]
         scores[rowid] = scores.get(rowid, 0) + 1.0 / (k + rank + 1)
     
-    # Sort by the new combined RRF score (ascending - lower is better)
-    sorted_ids = sorted(scores.items(), key=lambda x: x[1], reverse=False)[:top_n]
+    # Sort by RRF score descending (higher is more relevant)
+    sorted_ids = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:top_n]
     return sorted_ids
 
 @app.route('/api/search', methods=['POST'])
@@ -78,66 +83,48 @@ def search():
         data = request.json
         query_text = data.get('query', '')
         top_n = data.get('top_n', 20)
-        k = data.get('k', 20)
+        k_rrf = data.get('k', 60) # Renamed to avoid confusion with top_k
         
         if not query_text:
             return jsonify({'error': 'Query is required'}), 400
         
-        # Encode query
-        query_embedded = model.encode(
-            query_text, 
-            convert_to_numpy=True, 
-            normalize_embeddings=True
-        )
+        # 1. Encode query (BGE Large outputs 1024 dims)
+        query_embedded = get_embedding(query_text)
         
-        # Perform search
-        db = get_db_connection()
-        cursor = db.cursor()
-        
-        sorted_ids = hybrid_search(cursor, query_text, query_embedded, top_n=top_n, k=k)
+        # 2. Hybrid Search - Pass the global 'client' (renamed from cursor)
+        sorted_ids = hybrid_search(client, query_text, query_embedded, top_n=top_n, k=k_rrf)
         
         if not sorted_ids:
-            db.close()
             return jsonify({'results': []})
         
-        # Fetch review details
-        placeholders = ', '.join(['?'] * len(sorted_ids))
+        # 3. Fetch details
         rowids = [r[0] for r in sorted_ids]
+        placeholders = ', '.join(['?'] * len(rowids))
         
-        query = f"""
-            SELECT 
-                rt.tags,
-                r.artist,
-                r.title,
-                r.score,
-                r.url
+        # We use a JOIN to get details based on the rowids from our RRF
+        # Turso doesn't need a manually closed connection per request
+        res = client.execute(f"""
+            SELECT rt.rowid, rt.tags, r.artist, r.title, r.score, r.url
             FROM review_tags rt
             INNER JOIN reviews r ON rt.reviewid = r.reviewid
             WHERE rt.rowid IN ({placeholders})
-            ORDER BY CASE rt.rowid 
-                { ' '.join([f"WHEN ? THEN {i}" for i in range(len(rowids))]) } 
-            END
-        """
+        """, rowids)
         
-        cursor.execute(query, rowids + rowids)
-        rows = cursor.fetchall()
-        
-        # Format results
+        # 4. Map results back to sorted order
+        row_map = {row[0]: row[1:] for row in res.rows}
         results = []
-        for i, row in enumerate(rows):
-            tags, artist, title, score, url = row
-            accuracy = sorted_ids[i][1] if i < len(sorted_ids) else 0
-            
-            results.append({
-                'tags': tags,
-                'artist': artist,
-                'title': title,
-                'score': score,
-                'url': url,
-                'relevance': round(accuracy, 4)
-            })
+        for rid, score in sorted_ids:
+            if rid in row_map:
+                tags, artist, title, val_score, url = row_map[rid]
+                results.append({
+                    'tags': tags,
+                    'artist': artist,
+                    'title': title,
+                    'score': val_score,
+                    'url': url,
+                    'relevance': round(score, 4)
+                })
         
-        db.close()
         return jsonify({'results': results})
         
     except Exception as e:
