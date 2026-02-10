@@ -13,6 +13,7 @@ export interface AlbumResult {
   matchScore: number // 0-1, how well it matched the query (lower is better for RRF)
   matchType: "semantic" | "lexical" | "hybrid"
   url?: string | null // URL to the review
+  rrfScore?: number // Raw RRF relevance score (lower is better)
 }
 
 export const suggestedQueries = [

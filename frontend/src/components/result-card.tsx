@@ -87,6 +87,14 @@ export function ResultCard({ result, index }: ResultCardProps) {
               >
                 {matchTypeLabel[result.matchType]} {matchPercentage}%
               </span>
+              {result.rrfScore !== undefined && (
+                <span
+                  className="text-[8px] font-mono"
+                  style={{ color: "hsl(12 8% 35%)" }}
+                >
+                  RRF: {result.rrfScore.toFixed(4)}
+                </span>
+              )}
               {result.bestNewMusic && (
                 <span
                   className="flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono uppercase tracking-wider"

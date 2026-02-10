@@ -43,6 +43,7 @@ function convertBackendResult(backendResult: BackendResult, index: number): Albu
     matchScore: normalizedScore,
     matchType: "hybrid" as const, // Backend uses hybrid search
     url: backendResult.url || null,
+    rrfScore: backendResult.relevance, // Raw RRF score
   }
 }
 
@@ -104,7 +105,7 @@ export default function App() {
               className="font-mono text-xs uppercase tracking-[0.4em] font-bold"
               style={{ color: "var(--seashell)" }}
             >
-              CrateSearch
+              Semantic Grooves
             </span>
           </div>
           <div className="flex items-center gap-4">
@@ -161,7 +162,7 @@ export default function App() {
                 className="font-mono text-lg font-bold tracking-tight"
                 style={{ color: "var(--seashell)" }}
               >
-                CrateSearch
+                Semantic Grooves
               </span>
             </div>
           )}
@@ -269,7 +270,7 @@ export default function App() {
               className="font-mono text-[9px] uppercase tracking-[0.3em]"
               style={{ color: "hsl(12 8% 30%)" }}
             >
-              CrateSearch v0.1
+              Semantic Grooves v0.1
             </span>
           </div>
           <span
