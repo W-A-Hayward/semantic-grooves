@@ -4,3 +4,7 @@ archive.zip
 archive_24k.zip
 temp.py
 .env
+search_engine/
+v1/
+db/
+setup.py
