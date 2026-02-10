@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from sentence_transformers import SentenceTransformer
 import os
+import re
 
 app = Flask(__name__)
 CORS(app)
@@ -32,11 +33,31 @@ def hybrid_search(cursor, query_text, query_vector, top_n=10, k=60):
     """, (query_vector.tobytes(),)).fetchall()
     
     # 2. Get Lexical Results (Ranked by BM25 score)
-    fts_results = cursor.execute("""
-        SELECT rowid FROM review_text_fts 
-        WHERE review_text_fts MATCH ? 
-        ORDER BY rank LIMIT 50
-    """, (query_text,)).fetchall()
+    # Sanitize FTS5 query to prevent syntax errors
+    # FTS5 interprets "column:value" as column filters, so we need to escape colons
+    # Also escape other FTS5 special characters
+    fts_query = query_text.strip()
+    if not fts_query:
+        fts_results = []
+    else:
+        # Replace colons and other special FTS5 operators that might cause issues
+        # Replace "word:word" patterns (which FTS5 interprets as column:value)
+        fts_query = re.sub(r'(\w+):(\w+)', r'\1 \2', fts_query)
+        # Escape remaining special FTS5 characters
+        fts_query = fts_query.replace('"', ' ').replace("'", ' ')
+        # Clean up multiple spaces
+        fts_query = ' '.join(fts_query.split())
+        
+        try:
+            fts_results = cursor.execute("""
+                SELECT rowid FROM review_text_fts 
+                WHERE review_text_fts MATCH ? 
+                ORDER BY rank LIMIT 50
+            """, (fts_query,)).fetchall()
+        except sqlite3.OperationalError as e:
+            # If FTS5 query fails, skip FTS search and log the error
+            print(f"FTS5 query error: {e}, query: {fts_query}")
+            fts_results = []
     
     # 3. Combine using RRF
     scores = {}
