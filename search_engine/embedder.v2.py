@@ -5,7 +5,7 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 
 # --- Configuration ---
-DB_PATH = "../db/database.sqlite"
+DB_PATH = "../database.sqlite"
 MODEL_NAME = "BAAI/bge-large-en-v1.5"
 BATCH_SIZE = 128  # Optimized for 6800 XT VRAM
 CHUNK_LIMIT = 1200
