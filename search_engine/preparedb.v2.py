@@ -8,11 +8,11 @@ import time
 from ollama import AsyncClient
 
 # Database & Model Config
-DB_PATH = '../db/database.sqlite'
+DB_PATH = '../database.sqlite'
 MODEL_NAME = "qwen2.5:7b"
-BATCH_SIZE = 10 
-CHUNK_SIZE = 1200
-OVERLAP = 200
+BATCH_SIZE = 7 
+CHUNK_SIZE = 400
+OVERLAP = 50
 
 async def get_tags(client, text):
     """Fetches tags for a specific text segment."""
@@ -96,6 +96,7 @@ def stream_reviews(db, batch_size):
 
 async def main():
     db = sqlite3.connect(DB_PATH)
+    print(db)
     client = AsyncClient()
     total_processed = 0
     
