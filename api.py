@@ -75,8 +75,9 @@ def hybrid_search(cursor, query_text, query_vector, top_n=10, k=60):
     for rank, (rowid,) in enumerate(fts_results):
         scores[rowid] = scores.get(rowid, 0) + 1.0 / (k + rank + 1)
     
-    # Sort by the new combined RRF score (ascending - lower is better)
-    sorted_ids = sorted(scores.items(), key=lambda x: x[1], reverse=False)[:top_n]
+    # Best score first (RRF: a higher score is a better match); rowid breaks
+    # ties so the order is deterministic.
+    sorted_ids = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:top_n]
     return sorted_ids
 
 
