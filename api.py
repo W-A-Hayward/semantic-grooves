@@ -43,7 +43,7 @@ def sanitize_fts_query(query_text):
     return ' '.join(fts_query.split())
 
 
-def hybrid_search(cursor, query_text, query_vector, top_n=10, k=60):
+def hybrid_search(cursor, query_text, query_vector, top_n=None, k=60):
     """Perform hybrid search combining vector and lexical search."""
     # 1. Get Vector Results (Ranked by distance)
     vec_results = cursor.execute("""
@@ -82,29 +82,34 @@ def hybrid_search(cursor, query_text, query_vector, top_n=10, k=60):
 
 
 def search_albums(cursor, query_text, query_vector, top_n=20, k=20):
-    """Run the hybrid search and fetch review details for the ranked chunks."""
-    sorted_ids = hybrid_search(cursor, query_text, query_vector, top_n=top_n, k=k)
-
-    if not sorted_ids:
+    """Hybrid search returning at most one result (the best chunk) per album."""
+    # Rank every candidate chunk first; top_n counts albums, not chunks.
+    ranked = hybrid_search(cursor, query_text, query_vector, k=k)
+    if not ranked:
         return []
 
     # Fetch review details, keyed by chunk rowid so each result keeps the RRF
     # score of its own chunk (a chunk without a matching review is skipped).
-    placeholders = ', '.join(['?'] * len(sorted_ids))
+    placeholders = ', '.join(['?'] * len(ranked))
     rows = cursor.execute(f"""
-        SELECT rt.rowid, rt.tags, r.artist, r.title, r.score, r.url
+        SELECT rt.rowid, rt.reviewid, rt.tags, r.artist, r.title, r.score, r.url
         FROM review_tags rt
         INNER JOIN reviews r ON rt.reviewid = r.reviewid
         WHERE rt.rowid IN ({placeholders})
-    """, [rowid for rowid, _ in sorted_ids]).fetchall()
+    """, [rowid for rowid, _ in ranked]).fetchall()
     details = {row[0]: row[1:] for row in rows}
 
     results = []
-    for rowid, rrf_score in sorted_ids:
+    seen_reviews = set()
+    for rowid, rrf_score in ranked:
         if rowid not in details:
             continue  # orphan chunk with no matching review
-        tags, artist, title, score, url = details[rowid]
+        reviewid, tags, artist, title, score, url = details[rowid]
+        if reviewid in seen_reviews:
+            continue  # a better chunk of this album was already returned
+        seen_reviews.add(reviewid)
         results.append({
+            'reviewid': reviewid,
             'tags': tags,
             'artist': artist,
             'title': title,
@@ -112,6 +117,8 @@ def search_albums(cursor, query_text, query_vector, top_n=20, k=20):
             'url': url,
             'relevance': round(rrf_score, 4)
         })
+        if len(results) == top_n:
+            break
     return results
 
 
