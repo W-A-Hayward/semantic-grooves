@@ -46,7 +46,7 @@ def fetch_data(dest=None, force=False):
     try:
         db = sqlite3.connect(partial)
         try:
-            removed = prepare_database(db)
+            removed = prepare_database(db).duplicate_rows
         finally:
             db.close()
     except sqlite3.DatabaseError as e:

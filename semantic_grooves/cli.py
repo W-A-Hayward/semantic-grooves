@@ -92,10 +92,11 @@ def cmd_prepare_db(args):
 
     db = connect()
     try:
-        removed = prepare_database(db)
+        prepared = prepare_database(db)
     finally:
         db.close()
-    print(f"Removed {removed} duplicate rows. Indexes are in place.")
+    print(f"Removed {prepared.duplicate_rows} duplicate rows and {prepared.duplicate_chunks} duplicate chunks. "
+          "Indexes are in place.")
     return 0
 
 

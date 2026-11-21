@@ -120,11 +120,11 @@ def test_prepare_db_cleans_an_existing_database(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("SG_DB_PATH", path)
 
     assert cli.main(["prepare-db"]) == 0
-    assert "Removed 2 duplicate rows. Indexes are in place." in capsys.readouterr().out
+    assert "Removed 2 duplicate rows and 0 duplicate chunks. Indexes are in place." in capsys.readouterr().out
     assert count_reviews(path) == 3
 
     assert cli.main(["prepare-db"]) == 0                 # safe to repeat
-    assert "Removed 0 duplicate rows." in capsys.readouterr().out
+    assert "Removed 0 duplicate rows and 0 duplicate chunks." in capsys.readouterr().out
 
 
 def test_fetch_data_explains_a_missing_kagglehub(tmp_path, monkeypatch, capsys):
