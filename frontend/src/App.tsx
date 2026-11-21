@@ -11,11 +11,11 @@ import { MarqueeTicker } from "@/components/marquee-ticker"
 import { StatsBar } from "@/components/stats-bar"
 import { EqualizerBars } from "@/components/equalizer-bars"
 
-// RRF constant sent to the backend (see searchAlbums below)
+// RRF constant sent to the backend (see searchAlbums)
 const RRF_K = 20
 
 // Convert backend result to frontend format
-function convertBackendResult(backendResult: BackendResult, index: number): AlbumResult {
+function convertBackendResult(backendResult: BackendResult, index: number, maxRelevance: number): AlbumResult {
   // Extract genre from tags (tags format may vary)
   const tags = backendResult.tags || ""
   const genreMatch = tags.match(/(?:Genres?[:\s]+)?([^,]+)/i)
@@ -25,11 +25,9 @@ function convertBackendResult(backendResult: BackendResult, index: number): Albu
   const yearMatch = tags.match(/\b(19|20)\d{2}\b/)
   const year = yearMatch ? parseInt(yearMatch[0]) : 2000
   
-  // Higher RRF relevance = better match. A result ranked first by both the
-  // vector and the lexical search scores 2 / (k + 1), so dividing by that
-  // maximum gives a 0-1 score where higher is better.
-  const maxRrfScore = 2 / (RRF_K + 1)
-  const normalizedScore = Math.max(0, Math.min(1, backendResult.relevance / maxRrfScore))
+  // Higher relevance = better match. The backend reports the upper bound of an
+  // album score for this request, so dividing by it gives a 0-1 score.
+  const normalizedScore = Math.max(0, Math.min(1, backendResult.relevance / maxRelevance))
   
   return {
     id: `result-${index}`,
@@ -70,7 +68,7 @@ export default function App() {
       
       if (response.results && response.results.length > 0) {
         const convertedResults = response.results.map((result, index) => 
-          convertBackendResult(result, index)
+          convertBackendResult(result, index, response.max_relevance)
         )
         console.log("Converted results:", convertedResults)
         setResults(convertedResults)

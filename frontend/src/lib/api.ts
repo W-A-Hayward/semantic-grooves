@@ -4,11 +4,13 @@ export interface BackendResult {
   title: string | null
   score: number | null
   url: string | null
-  relevance: number
+  relevance: number // album-level RRF score, higher is better
 }
 
 export interface SearchResponse {
   results: BackendResult[]
+  // Upper bound of `relevance` for this request; divide by it to get 0-1.
+  max_relevance: number
 }
 
 export async function searchAlbums(query: string, topN: number = 20, k: number = 20): Promise<SearchResponse> {
