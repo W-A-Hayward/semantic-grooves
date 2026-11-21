@@ -6,3 +6,9 @@ temp.py
 .env
 __pycache__/
 .pytest_cache/
+dump.sql
+db/
+.venv/
+*.egg-info/
+dist/
+build/
