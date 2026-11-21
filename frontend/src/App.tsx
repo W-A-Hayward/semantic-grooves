@@ -11,6 +11,9 @@ import { MarqueeTicker } from "@/components/marquee-ticker"
 import { StatsBar } from "@/components/stats-bar"
 import { EqualizerBars } from "@/components/equalizer-bars"
 
+// RRF constant sent to the backend (see searchAlbums below)
+const RRF_K = 20
+
 // Convert backend result to frontend format
 function convertBackendResult(backendResult: BackendResult, index: number): AlbumResult {
   // Extract genre from tags (tags format may vary)
@@ -22,11 +25,11 @@ function convertBackendResult(backendResult: BackendResult, index: number): Albu
   const yearMatch = tags.match(/\b(19|20)\d{2}\b/)
   const year = yearMatch ? parseInt(yearMatch[0]) : 2000
   
-  // Use relevance as matchScore (lower is better for RRF)
-  // For display purposes, we'll use the relevance directly (lower = better match)
-  // The ResultCard expects a 0-1 score where higher is better, so we'll invert
-  // RRF scores are typically 0.01-0.05, so we normalize: 1 - (relevance * 10) gives us a 0.5-0.99 range
-  const normalizedScore = Math.max(0.5, Math.min(0.99, 1 - (backendResult.relevance * 10)))
+  // Higher RRF relevance = better match. A result ranked first by both the
+  // vector and the lexical search scores 2 / (k + 1), so dividing by that
+  // maximum gives a 0-1 score where higher is better.
+  const maxRrfScore = 2 / (RRF_K + 1)
+  const normalizedScore = Math.max(0, Math.min(1, backendResult.relevance / maxRrfScore))
   
   return {
     id: `result-${index}`,
@@ -43,7 +46,7 @@ function convertBackendResult(backendResult: BackendResult, index: number): Albu
     matchScore: normalizedScore,
     matchType: "hybrid" as const, // Backend uses hybrid search
     url: backendResult.url || null,
-    rrfScore: backendResult.relevance, // Raw RRF score
+    rrfScore: backendResult.relevance, // Raw RRF score (higher is better)
   }
 }
 
@@ -61,7 +64,7 @@ export default function App() {
 
     try {
       console.log("Searching for:", query)
-      const response = await searchAlbums(query, 20, 20)
+      const response = await searchAlbums(query, 20, RRF_K)
       console.log("API response:", response)
       console.log("Results count:", response.results?.length || 0)
       

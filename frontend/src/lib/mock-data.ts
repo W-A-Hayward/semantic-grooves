@@ -10,10 +10,10 @@ export interface AlbumResult {
   reviewExcerpt: string
   bestNewMusic: boolean
   coverUrl: string
-  matchScore: number // 0-1, how well it matched the query (lower is better for RRF)
+  matchScore: number // 0-1, how well it matched the query (higher is better)
   matchType: "semantic" | "lexical" | "hybrid"
   url?: string | null // URL to the review
-  rrfScore?: number // Raw RRF relevance score (lower is better)
+  rrfScore?: number // Raw RRF relevance score (higher is better)
 }
 
 export const suggestedQueries = [
