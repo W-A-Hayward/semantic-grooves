@@ -1,6 +1,6 @@
 import pytest
 
-from conftest import AMBIENT_QUERY
+from conftest import AMBIENT_QUERY, vec
 import api
 
 
@@ -33,9 +33,41 @@ def test_vector_only_when_query_has_no_lexical_terms(cursor):
     assert ranked[0][0] == 1
 
 
-@pytest.mark.parametrize("query", ['foo:bar', '"unbalanced', "it's", "AND", "(("])
+@pytest.mark.parametrize("query", ['foo:bar', '"unbalanced', "it's", "AND", "((", "a, b", "x*", "-y", "NEAR(a b)"])
 def test_malformed_fts_queries_do_not_raise(cursor, query):
     api.hybrid_search(cursor, query, AMBIENT_QUERY)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("quiet, warm & unhurried", '"quiet" "warm" "unhurried"'),    # punctuation is inert
+    ('foo:bar "x', '"foo" "bar"'),                                # colon is not a column filter
+    ("the feeling of a quiet morning", '"feeling" "quiet" "morning"'),  # stopwords dropped
+    ("AND OR NOT NEAR(zz yy) *", '"not" "near" "zz" "yy"'),       # operators become plain terms
+    ("warm WARM warm", '"warm"'),                                 # de-duplicated
+    ("Caf\u00e9 noir", '"caf\u00e9" "noir"'),                         # unicode kept
+    ("the of a", ""),                                             # nothing usable left
+    ("   ", ""),
+])
+def test_sanitize_fts_query(text, expected):
+    assert api.sanitize_fts_query(text) == expected
+
+
+@pytest.mark.parametrize("text", [
+    "quiet ambient, piano", "foo:bar", "\"unbalanced", "NEAR(a b)", "x* -y", "(( ))", "it's",
+])
+def test_sanitized_queries_are_valid_fts5(cursor, text):
+    fts_query = api.sanitize_fts_query(text)
+    if fts_query:  # would raise sqlite3.OperationalError on a syntax error
+        cursor.execute("SELECT rowid FROM review_text_fts WHERE review_text_fts MATCH ?",
+                       (fts_query,)).fetchall()
+
+
+def test_punctuation_in_query_does_not_disable_lexical_search(cursor):
+    # Vector search is limited to the single nearest chunk (3, the punk chunk),
+    # so chunk 2 can only be found by the lexical retriever. A comma used to
+    # make FTS5 raise, silently dropping the lexical results.
+    ranked = api.hybrid_search(cursor, "quiet ambient, piano", vec(0, 1, 0, 0), candidates=1)
+    assert {rowid for rowid, _ in ranked} == {3, 2}
 
 
 def test_one_result_per_album(cursor):

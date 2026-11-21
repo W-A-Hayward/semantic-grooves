@@ -40,11 +40,28 @@ def get_db_connection():
     return db
 
 
+# Words that carry no mood or style information. Dropping them keeps the
+# implicit AND of the lexical query from failing on filler like "the" or "of".
+FTS_STOPWORDS = frozenset(
+    "a an and are as at be been but by for from had has have i if in into is it "
+    "its me my of on or our so than that the their them then these they this "
+    "those to was we were what when where which while who will with you your".split()
+)
+
+
 def sanitize_fts_query(query_text):
-    """Make free text safe for FTS5 MATCH (colons would be read as column filters)."""
-    fts_query = re.sub(r'(\w+):(\w+)', r'\1 \2', query_text.strip())
-    fts_query = fts_query.replace('"', ' ').replace("'", ' ')
-    return ' '.join(fts_query.split())
+    """Turn free text into a safe FTS5 MATCH expression.
+
+    Every term is split on non-word characters and double-quoted, so commas,
+    colons, quotes, parentheses and FTS5 operators (AND, OR, NOT, NEAR, *, -)
+    in user input are inert instead of raising a syntax error. Quoted terms
+    are implicitly AND-ed. Returns "" when no usable term remains.
+    """
+    terms = []
+    for term in re.findall(r"\w+", query_text.lower()):
+        if len(term) > 1 and term not in FTS_STOPWORDS and term not in terms:
+            terms.append(term)
+    return ' '.join(f'"{term}"' for term in terms)
 
 
 def hybrid_search(cursor, query_text, query_vector, top_n=None, k=60, candidates=CANDIDATES):
