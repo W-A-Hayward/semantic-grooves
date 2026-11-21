@@ -84,11 +84,11 @@ def test_orphan_chunks_are_skipped_and_scores_stay_aligned(cursor):
     results = api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=20)
 
     assert 99 not in [r["reviewid"] for r in results]
-    # Chunk 5 (orphan) sits between chunks 1 and 4 in the ranking. Every
-    # returned relevance must be the score of the album's own best chunk.
-    best_chunk = {1: 1, 3: 4, 2: 3}
+    # Each album's relevance is the sum of its own chunks' scores.
+    chunks_of_album = {1: [1, 2], 3: [4], 2: [3]}
     for r in results:
-        assert r["relevance"] == pytest.approx(ranked[best_chunk[r["reviewid"]]], abs=1e-4)
+        expected = sum(ranked[c] for c in chunks_of_album[r["reviewid"]])
+        assert r["relevance"] == pytest.approx(expected, abs=1e-4)
 
 
 def test_results_sorted_best_first_with_expected_albums(cursor):
@@ -100,6 +100,56 @@ def test_results_sorted_best_first_with_expected_albums(cursor):
 
 def test_top_n_limits_albums(cursor):
     assert len(api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=1)) == 1
+
+
+# --- album-level scoring (pure function, synthetic data) ---
+
+def details_for(chunks):
+    """chunks: {rowid: reviewid}; builds the `details` mapping rank_albums expects."""
+    return {rowid: (reviewid, f"tags{rowid}", f"artist{reviewid}", f"title{reviewid}", 7.0, "u")
+            for rowid, reviewid in chunks.items()}
+
+
+def test_album_with_several_good_chunks_beats_one_slightly_better_chunk():
+    ranked = [(10, 0.050), (11, 0.030), (12, 0.029)]
+    details = details_for({10: 1, 11: 2, 12: 2})
+    results = api.rank_albums(ranked, details, top_n=5)
+
+    assert [r["reviewid"] for r in results] == [2, 1]
+    assert results[0]["relevance"] == pytest.approx(0.059)
+
+
+def test_album_score_counts_only_the_best_few_chunks(monkeypatch):
+    monkeypatch.setattr(api, "ALBUM_CHUNKS", 3)
+    ranked = [(i, 0.01) for i in range(1, 6)]            # five equal chunks, one album
+    results = api.rank_albums(ranked, details_for({i: 1 for i in range(1, 6)}), top_n=5)
+    assert results[0]["relevance"] == pytest.approx(0.03)  # not 0.05
+
+
+def test_album_uses_tags_of_its_best_chunk():
+    ranked = [(10, 0.05), (11, 0.04)]
+    results = api.rank_albums(ranked, details_for({10: 1, 11: 1}), top_n=5)
+    assert results[0]["tags"] == "tags10"
+
+
+def test_album_ties_break_on_best_chunk_rowid():
+    ranked = [(7, 0.02), (3, 0.02)]
+    results = api.rank_albums(ranked, details_for({7: 1, 3: 2}), top_n=5)
+    assert [r["reviewid"] for r in results] == [2, 1]
+
+
+def test_rank_albums_skips_chunks_without_details_and_honours_top_n():
+    ranked = [(1, 0.05), (2, 0.04), (3, 0.03)]
+    results = api.rank_albums(ranked, details_for({2: 20, 3: 30}), top_n=1)
+    assert [r["reviewid"] for r in results] == [20]
+
+
+def test_max_relevance_bounds_every_album_score(cursor):
+    k = 20
+    results = api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=k)
+    assert all(r["relevance"] <= api.max_relevance(k) for r in results)
+    # 3 chunks ranked 1st, 2nd, 3rd in both lists
+    assert api.max_relevance(k) == pytest.approx(2 * (1/21 + 1/22 + 1/23))
 
 
 # --- query embedding prefix ---

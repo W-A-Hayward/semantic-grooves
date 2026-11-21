@@ -61,6 +61,12 @@ def test_db_connection_is_closed_when_search_fails(client, monkeypatch):
     assert closed == [True]
 
 
+def test_response_includes_max_relevance_for_scaling(client):
+    body = client.post("/api/search", json={"query": "ambient", "k": 20}).get_json()
+    assert body["max_relevance"] == round(api.max_relevance(20), 4)
+    assert all(0 < r["relevance"] <= body["max_relevance"] for r in body["results"])
+
+
 def test_search_embeds_the_query_with_the_prefix(client, monkeypatch):
     seen = []
 

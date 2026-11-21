@@ -14,8 +14,13 @@ DB_PATH = os.environ.get(
 )
 
 # Number of candidate chunks fetched from each retriever (vector and lexical).
-CANDIDATES = 50
+# A larger pool lets several chunks of the same album show up, which is what
+# album-level scoring needs.
+CANDIDATES = 200
 MAX_TOP_N = 100
+
+# An album's score is the sum of its best ALBUM_CHUNKS chunk scores.
+ALBUM_CHUNKS = 3
 
 # BGE retrieval models are trained to embed short queries with this
 # instruction in front. Set SG_QUERY_PREFIX="" to disable it.
@@ -118,8 +123,54 @@ def hybrid_search(cursor, query_text, query_vector, top_n=None, k=60, candidates
     return ranked[:top_n] if top_n is not None else ranked
 
 
+def max_relevance(k):
+    """Upper bound of an album score: its best ALBUM_CHUNKS chunks ranked 1st,
+    2nd, ... in both retrievers. Use it to scale `relevance` to 0-1."""
+    return 2 * sum(1.0 / (k + i) for i in range(1, ALBUM_CHUNKS + 1))
+
+
+def rank_albums(ranked, details, top_n):
+    """Group ranked chunks into albums and return the top_n albums.
+
+    `ranked` is [(rowid, rrf_score)] best first; `details` maps a chunk rowid to
+    (reviewid, tags, artist, title, score, url). An album's relevance is the sum
+    of its best ALBUM_CHUNKS chunk scores, so an album described consistently
+    across several passages beats one that matched a single passage. Its tags
+    come from its best chunk. Chunks without a review row are skipped.
+    """
+    albums = {}  # reviewid -> {'chunks': [(score, rowid)], ...}
+    for rowid, rrf_score in ranked:
+        if rowid not in details:
+            continue  # orphan chunk with no matching review
+        reviewid = details[rowid][0]
+        albums.setdefault(reviewid, []).append((rrf_score, rowid))
+
+    scored = []
+    for reviewid, chunks in albums.items():
+        chunks.sort(key=lambda c: (-c[0], c[1]))  # best chunk first (ranked order already)
+        relevance = sum(score for score, _ in chunks[:ALBUM_CHUNKS])
+        scored.append((relevance, chunks[0][1], reviewid))
+    # Best album first; the best chunk's rowid breaks ties deterministically.
+    scored.sort(key=lambda item: (-item[0], item[1]))
+
+    results = []
+    for relevance, best_rowid, reviewid in scored[:top_n]:
+        _, tags, artist, title, score, url = details[best_rowid]
+        results.append({
+            'reviewid': reviewid,
+            'tags': tags,
+            'artist': artist,
+            'title': title,
+            'score': score,
+            'url': url,
+            'relevance': round(relevance, 4),
+        })
+    return results
+
+
 def search_albums(cursor, query_text, query_vector, top_n=20, k=20):
-    """Hybrid search returning at most one result (the best chunk) per album."""
+    """Hybrid search returning one result per album, scored over its chunks."""
+    # Rank every candidate chunk first; top_n counts albums, not chunks.
     ranked = hybrid_search(cursor, query_text, query_vector, k=k)
     if not ranked:
         return []
@@ -132,28 +183,7 @@ def search_albums(cursor, query_text, query_vector, top_n=20, k=20):
         WHERE rt.rowid IN ({placeholders})
     """, [rowid for rowid, _ in ranked]).fetchall()
     details = {row[0]: row[1:] for row in rows}
-
-    results = []
-    seen_reviews = set()
-    for rowid, rrf_score in ranked:
-        if rowid not in details:
-            continue  # orphan chunk with no matching review
-        reviewid, tags, artist, title, score, url = details[rowid]
-        if reviewid in seen_reviews:
-            continue  # a better chunk of this album was already returned
-        seen_reviews.add(reviewid)
-        results.append({
-            'reviewid': reviewid,
-            'tags': tags,
-            'artist': artist,
-            'title': title,
-            'score': score,
-            'url': url,
-            'relevance': round(rrf_score, 4),
-        })
-        if len(results) == top_n:
-            break
-    return results
+    return rank_albums(ranked, details, top_n)
 
 
 def parse_int(data, key, default, minimum, maximum):
@@ -188,7 +218,7 @@ def search():
             results = search_albums(db.cursor(), query_text, query_embedded, top_n=top_n, k=k)
         finally:
             db.close()
-        return jsonify({'results': results})
+        return jsonify({'results': results, 'max_relevance': round(max_relevance(k), 4)})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500
