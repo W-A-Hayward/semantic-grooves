@@ -88,41 +88,29 @@ def search_albums(cursor, query_text, query_vector, top_n=20, k=20):
     if not sorted_ids:
         return []
 
-    # Fetch review details
+    # Fetch review details, keyed by chunk rowid so each result keeps the RRF
+    # score of its own chunk (a chunk without a matching review is skipped).
     placeholders = ', '.join(['?'] * len(sorted_ids))
-    rowids = [r[0] for r in sorted_ids]
-
-    query = f"""
-        SELECT 
-            rt.tags,
-            r.artist,
-            r.title,
-            r.score,
-            r.url
+    rows = cursor.execute(f"""
+        SELECT rt.rowid, rt.tags, r.artist, r.title, r.score, r.url
         FROM review_tags rt
         INNER JOIN reviews r ON rt.reviewid = r.reviewid
         WHERE rt.rowid IN ({placeholders})
-        ORDER BY CASE rt.rowid 
-            { ' '.join([f"WHEN ? THEN {i}" for i in range(len(rowids))]) } 
-        END
-    """
+    """, [rowid for rowid, _ in sorted_ids]).fetchall()
+    details = {row[0]: row[1:] for row in rows}
 
-    cursor.execute(query, rowids + rowids)
-    rows = cursor.fetchall()
-
-    # Format results
     results = []
-    for i, row in enumerate(rows):
-        tags, artist, title, score, url = row
-        accuracy = sorted_ids[i][1] if i < len(sorted_ids) else 0
-
+    for rowid, rrf_score in sorted_ids:
+        if rowid not in details:
+            continue  # orphan chunk with no matching review
+        tags, artist, title, score, url = details[rowid]
         results.append({
             'tags': tags,
             'artist': artist,
             'title': title,
             'score': score,
             'url': url,
-            'relevance': round(accuracy, 4)
+            'relevance': round(rrf_score, 4)
         })
     return results
 

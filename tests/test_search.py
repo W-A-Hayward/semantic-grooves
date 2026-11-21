@@ -36,3 +36,20 @@ def test_vector_only_when_query_has_no_lexical_terms(cursor):
 @pytest.mark.parametrize("query", ['foo:bar', '"unbalanced', "it's", "AND", "(("])
 def test_malformed_fts_queries_do_not_raise(cursor, query):
     api.hybrid_search(cursor, query, AMBIENT_QUERY)
+
+
+# Album (artist) each fixture chunk belongs to; chunk 5 is an orphan.
+ALBUM_OF_CHUNK = {1: "alpha", 2: "alpha", 3: "beta", 4: "gamma"}
+
+
+def test_orphan_chunks_are_skipped_and_scores_stay_aligned(cursor):
+    ranked = api.hybrid_search(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=20)
+    assert 5 in [rowid for rowid, _ in ranked]  # the orphan chunk really is a candidate
+
+    results = api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=20)
+
+    # Every result keeps the score of its own chunk, even though the orphan
+    # sitting in the middle of the ranking has no row to return.
+    expected = [(ALBUM_OF_CHUNK[rowid], round(score, 4))
+                for rowid, score in ranked if rowid != 5]
+    assert [(r["artist"], r["relevance"]) for r in results] == expected
