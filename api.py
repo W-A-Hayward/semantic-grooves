@@ -17,6 +17,12 @@ DB_PATH = os.environ.get(
 CANDIDATES = 50
 MAX_TOP_N = 100
 
+# BGE retrieval models are trained to embed short queries with this
+# instruction in front. Set SG_QUERY_PREFIX="" to disable it.
+QUERY_PREFIX = os.environ.get(
+    "SG_QUERY_PREFIX", "Represent this sentence for searching relevant passages: "
+)
+
 _model = None
 
 
@@ -30,6 +36,15 @@ def get_model():
         device = "cuda" if torch.cuda.is_available() else "cpu"
         _model = SentenceTransformer(MODEL_NAME, device=device)
     return _model
+
+
+def embed_query(text):
+    """Embed a search query (with the BGE retrieval instruction prefix)."""
+    return get_model().encode(
+        QUERY_PREFIX + text,
+        convert_to_numpy=True,
+        normalize_embeddings=True
+    )
 
 
 def get_db_connection():
@@ -166,11 +181,7 @@ def search():
         return jsonify({'error': str(e)}), 400
 
     try:
-        query_embedded = get_model().encode(
-            query_text,
-            convert_to_numpy=True,
-            normalize_embeddings=True
-        )
+        query_embedded = embed_query(query_text)
 
         db = get_db_connection()
         try:

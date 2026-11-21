@@ -1,4 +1,5 @@
 import api
+from conftest import AMBIENT_QUERY
 
 
 def test_health(client):
@@ -58,3 +59,16 @@ def test_db_connection_is_closed_when_search_fails(client, monkeypatch):
     resp = client.post("/api/search", json={"query": "ambient"})
     assert resp.status_code == 500
     assert closed == [True]
+
+
+def test_search_embeds_the_query_with_the_prefix(client, monkeypatch):
+    seen = []
+
+    class Model:
+        def encode(self, text, **kwargs):
+            seen.append(text)
+            return AMBIENT_QUERY
+
+    monkeypatch.setattr(api, "get_model", lambda: Model())
+    client.post("/api/search", json={"query": "ambient"})
+    assert seen == [api.QUERY_PREFIX + "ambient"]

@@ -100,3 +100,30 @@ def test_results_sorted_best_first_with_expected_albums(cursor):
 
 def test_top_n_limits_albums(cursor):
     assert len(api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=1)) == 1
+
+
+# --- query embedding prefix ---
+
+class RecordingModel:
+    def __init__(self):
+        self.texts = []
+
+    def encode(self, text, **kwargs):
+        self.texts.append(text)
+        return AMBIENT_QUERY
+
+
+def test_embed_query_adds_the_bge_instruction_prefix(monkeypatch):
+    model = RecordingModel()
+    monkeypatch.setattr(api, "get_model", lambda: model)
+    api.embed_query("warm and unhurried")
+    assert model.texts == [api.QUERY_PREFIX + "warm and unhurried"]
+    assert api.QUERY_PREFIX.startswith("Represent this sentence for searching relevant passages")
+
+
+def test_embed_query_prefix_can_be_disabled(monkeypatch):
+    model = RecordingModel()
+    monkeypatch.setattr(api, "get_model", lambda: model)
+    monkeypatch.setattr(api, "QUERY_PREFIX", "")
+    api.embed_query("warm and unhurried")
+    assert model.texts == ["warm and unhurried"]
