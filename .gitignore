@@ -4,3 +4,5 @@ archive.zip
 archive_24k.zip
 temp.py
 .env
+__pycache__/
+.pytest_cache/
