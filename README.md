@@ -1,6 +1,6 @@
 # Semantic Grooves
 
-**Discover music by how it feels, not by what it's called.** A search engine over 18,393 Pitchfork album reviews: type a mood in plain language, get the records critics described that way, whatever their genre.
+**Discover music by how it feels, not by what it's called.** A search engine over 18,389 Pitchfork album reviews: type a mood in plain language, get the records critics described that way, whatever their genre.
 
 ## The idea
 
@@ -45,7 +45,7 @@ An album matched by several passages outranks one matched by a single passage. H
 
 | | |
 |---|---|
-| Corpus | 18,393 reviews, 217,206 chunks (389 characters on average) |
+| Corpus | 18,389 reviews (the dataset has 18,393 rows; 4 reviews are listed twice), 217,206 chunks (389 characters on average) |
 | Index | one 1.2 GB SQLite file: metadata, tags, vectors, full-text index |
 | Latency | about 0.5 s per warm query on an AMD GPU (ROCm); 23 s cold start; CPU not measured |
 | Stack | Python 3.12 &middot; Flask &middot; sentence-transformers &middot; sqlite-vec &middot; React + Vite |
@@ -69,18 +69,25 @@ No labelled quality data exists yet, so every change below was checked against a
 - **Tag noise.** About 16% of chunks (35,045) carry prompt-category words as tags (*"Emotions, Feelings, Instruments, Genres, Effects"*), which are embedded along with the real tags. Cleaning them means re-embedding.
 - **Corpus bias:** Pitchfork only, 1999&ndash;2017.
 - **No evaluation set.** The next step is about 30 judged mood queries to settle the open questions above.
-- **Setup is manual:** the build needs Ollama and a GPU, scripts use paths relative to `search_engine/`, `search_engine/search.py` points at an empty DB, and `npm run build` fails on a type error in `components/ui/calendar.tsx` (`npm run dev` works).
+- **Rebuilding is heavy:** tagging needs Ollama (hours) and embedding wants a GPU. The prebuilt database is not distributed yet, and `npm run build` fails on a type error in `components/ui/calendar.tsx` (`npm run dev` works).
 
 ## Run it
 
 ```bash
-pip install -r requirements-api.txt && python api.py            # API on :5000 (needs database.sqlite in the repo root)
-cd frontend && npm install && npm run dev                      # UI on :3000
+uv sync --extra dev --extra build        # or: pip install -e '.[dev,build]'   (Python 3.10+)
+sg serve                                 # API on :5000, needs database.sqlite in the repo root (or SG_DB_PATH)
+sg search "warm and unhurried"           # same search from the terminal
+cd frontend && npm install && npm run dev    # UI on :3000
 
-pip install -r requirements-dev.txt && pytest                  # 50 tests, no database or model needed
-
-# Rebuild the database from scratch (hours; needs Ollama with qwen2.5:7b):
-python setup.py && cd search_engine && python preparedb.v2.py && python embedder.v2.py
+pytest                                   # 90 tests, no database, model or Ollama needed
 ```
 
-`POST /api/search {"query": "...", "top_n": 20, "k": 20}` returns `{"results": [{reviewid, artist, title, score, url, tags, relevance}], "max_relevance": 0.2731}`. Set `SG_QUERY_PREFIX=""` to disable the query prefix and `SG_DB_PATH` to point at another database.
+**Rebuild the database from scratch** (hours; needs [Ollama](https://ollama.com) running with `qwen2.5:7b` pulled):
+
+```bash
+sg fetch-data      # download the Pitchfork dataset from Kaggle
+sg build-tags      # chunk reviews + LLM mood tags (resumable; --limit N to try it out)
+sg build-index     # embeddings + full-text index (incremental; --rebuild starts over)
+```
+
+`POST /api/search {"query": "...", "top_n": 20, "k": 20}` returns `{"results": [{reviewid, artist, title, score, url, tags, relevance}], "max_relevance": 0.2731}`. `SG_DB_PATH` points at another database, and `SG_QUERY_PREFIX=""` disables the query prefix. `uv sync` installs the default PyPI torch; on ROCm or CPU-only machines install the matching torch wheel first.
