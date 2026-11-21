@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import sqlite_vec
 
-import api
+from semantic_grooves import embedding
 
 DIM = 4
 
@@ -85,7 +85,9 @@ class StubModel:
 
 @pytest.fixture
 def client(db_path, monkeypatch):
-    monkeypatch.setattr(api, "DB_PATH", db_path)
-    monkeypatch.setattr(api, "get_model", lambda: StubModel())
+    from semantic_grooves import api
+
+    monkeypatch.setenv("SG_DB_PATH", db_path)
+    monkeypatch.setattr(embedding, "get_model", lambda: StubModel())
     api.app.config["TESTING"] = True
     return api.app.test_client()

@@ -1,11 +1,11 @@
 import pytest
 
 from conftest import AMBIENT_QUERY, vec
-import api
+from semantic_grooves import search
 
 
 def test_rrf_ranks_best_match_first(cursor):
-    ranked = api.hybrid_search(cursor, "ambient", AMBIENT_QUERY, k=20)
+    ranked = search.hybrid_search(cursor, "ambient", AMBIENT_QUERY, k=20)
     scores = [score for _, score in ranked]
 
     assert scores == sorted(scores, reverse=True)
@@ -15,27 +15,27 @@ def test_rrf_ranks_best_match_first(cursor):
 
 def test_rrf_top_score_is_two_first_ranks(cursor):
     k = 20
-    (rowid, score), *_ = api.hybrid_search(cursor, "ambient", AMBIENT_QUERY, k=k)
+    (rowid, score), *_ = search.hybrid_search(cursor, "ambient", AMBIENT_QUERY, k=k)
     # Rank 0 in the vector list: 1/(k+1). Lexical rank depends on BM25, so only
     # bound it: the best possible fused score is 2/(k+1).
     assert 1 / (k + 1) < score <= 2 / (k + 1)
 
 
 def test_top_n_truncates_after_ranking(cursor):
-    full = api.hybrid_search(cursor, "ambient", AMBIENT_QUERY)
-    top2 = api.hybrid_search(cursor, "ambient", AMBIENT_QUERY, top_n=2)
+    full = search.hybrid_search(cursor, "ambient", AMBIENT_QUERY)
+    top2 = search.hybrid_search(cursor, "ambient", AMBIENT_QUERY, top_n=2)
     assert top2 == full[:2]
 
 
 def test_vector_only_when_query_has_no_lexical_terms(cursor):
-    ranked = api.hybrid_search(cursor, "   ", AMBIENT_QUERY)
+    ranked = search.hybrid_search(cursor, "   ", AMBIENT_QUERY)
     assert ranked  # vector results still come back
     assert ranked[0][0] == 1
 
 
 @pytest.mark.parametrize("query", ['foo:bar', '"unbalanced', "it's", "AND", "((", "a, b", "x*", "-y", "NEAR(a b)"])
 def test_malformed_fts_queries_do_not_raise(cursor, query):
-    api.hybrid_search(cursor, query, AMBIENT_QUERY)
+    search.hybrid_search(cursor, query, AMBIENT_QUERY)
 
 
 @pytest.mark.parametrize("text, expected", [
@@ -49,14 +49,14 @@ def test_malformed_fts_queries_do_not_raise(cursor, query):
     ("   ", ""),
 ])
 def test_sanitize_fts_query(text, expected):
-    assert api.sanitize_fts_query(text) == expected
+    assert search.sanitize_fts_query(text) == expected
 
 
 @pytest.mark.parametrize("text", [
     "quiet ambient, piano", "foo:bar", "\"unbalanced", "NEAR(a b)", "x* -y", "(( ))", "it's",
 ])
 def test_sanitized_queries_are_valid_fts5(cursor, text):
-    fts_query = api.sanitize_fts_query(text)
+    fts_query = search.sanitize_fts_query(text)
     if fts_query:  # would raise sqlite3.OperationalError on a syntax error
         cursor.execute("SELECT rowid FROM review_text_fts WHERE review_text_fts MATCH ?",
                        (fts_query,)).fetchall()
@@ -66,12 +66,12 @@ def test_punctuation_in_query_does_not_disable_lexical_search(cursor):
     # Vector search is limited to the single nearest chunk (3, the punk chunk),
     # so chunk 2 can only be found by the lexical retriever. A comma used to
     # make FTS5 raise, silently dropping the lexical results.
-    ranked = api.hybrid_search(cursor, "quiet ambient, piano", vec(0, 1, 0, 0), candidates=1)
+    ranked = search.hybrid_search(cursor, "quiet ambient, piano", vec(0, 1, 0, 0), candidates=1)
     assert {rowid for rowid, _ in ranked} == {3, 2}
 
 
 def test_one_result_per_album(cursor):
-    results = api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10)
+    results = search.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10)
     reviewids = [r["reviewid"] for r in results]
     assert len(reviewids) == len(set(reviewids))
     # Chunks 1 and 2 both belong to album 1; only the best one is kept.
@@ -79,9 +79,9 @@ def test_one_result_per_album(cursor):
 
 
 def test_orphan_chunks_are_skipped_and_scores_stay_aligned(cursor):
-    ranked = dict(api.hybrid_search(cursor, "ambient", AMBIENT_QUERY, k=20))
+    ranked = dict(search.hybrid_search(cursor, "ambient", AMBIENT_QUERY, k=20))
     assert 5 in ranked  # the orphan chunk really is a candidate
-    results = api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=20)
+    results = search.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=20)
 
     assert 99 not in [r["reviewid"] for r in results]
     # Each album's relevance is the sum of its own chunks' scores.
@@ -92,14 +92,14 @@ def test_orphan_chunks_are_skipped_and_scores_stay_aligned(cursor):
 
 
 def test_results_sorted_best_first_with_expected_albums(cursor):
-    results = api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10)
+    results = search.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10)
     relevances = [r["relevance"] for r in results]
     assert relevances == sorted(relevances, reverse=True)
     assert results[0]["artist"] == "alpha"
 
 
 def test_top_n_limits_albums(cursor):
-    assert len(api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=1)) == 1
+    assert len(search.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=1)) == 1
 
 
 # --- album-level scoring (pure function, synthetic data) ---
@@ -113,67 +113,40 @@ def details_for(chunks):
 def test_album_with_several_good_chunks_beats_one_slightly_better_chunk():
     ranked = [(10, 0.050), (11, 0.030), (12, 0.029)]
     details = details_for({10: 1, 11: 2, 12: 2})
-    results = api.rank_albums(ranked, details, top_n=5)
+    results = search.rank_albums(ranked, details, top_n=5)
 
     assert [r["reviewid"] for r in results] == [2, 1]
     assert results[0]["relevance"] == pytest.approx(0.059)
 
 
 def test_album_score_counts_only_the_best_few_chunks(monkeypatch):
-    monkeypatch.setattr(api, "ALBUM_CHUNKS", 3)
+    monkeypatch.setattr(search, "ALBUM_CHUNKS", 3)
     ranked = [(i, 0.01) for i in range(1, 6)]            # five equal chunks, one album
-    results = api.rank_albums(ranked, details_for({i: 1 for i in range(1, 6)}), top_n=5)
+    results = search.rank_albums(ranked, details_for({i: 1 for i in range(1, 6)}), top_n=5)
     assert results[0]["relevance"] == pytest.approx(0.03)  # not 0.05
 
 
 def test_album_uses_tags_of_its_best_chunk():
     ranked = [(10, 0.05), (11, 0.04)]
-    results = api.rank_albums(ranked, details_for({10: 1, 11: 1}), top_n=5)
+    results = search.rank_albums(ranked, details_for({10: 1, 11: 1}), top_n=5)
     assert results[0]["tags"] == "tags10"
 
 
 def test_album_ties_break_on_best_chunk_rowid():
     ranked = [(7, 0.02), (3, 0.02)]
-    results = api.rank_albums(ranked, details_for({7: 1, 3: 2}), top_n=5)
+    results = search.rank_albums(ranked, details_for({7: 1, 3: 2}), top_n=5)
     assert [r["reviewid"] for r in results] == [2, 1]
 
 
 def test_rank_albums_skips_chunks_without_details_and_honours_top_n():
     ranked = [(1, 0.05), (2, 0.04), (3, 0.03)]
-    results = api.rank_albums(ranked, details_for({2: 20, 3: 30}), top_n=1)
+    results = search.rank_albums(ranked, details_for({2: 20, 3: 30}), top_n=1)
     assert [r["reviewid"] for r in results] == [20]
 
 
 def test_max_relevance_bounds_every_album_score(cursor):
     k = 20
-    results = api.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=k)
-    assert all(r["relevance"] <= api.max_relevance(k) for r in results)
+    results = search.search_albums(cursor, "ambient", AMBIENT_QUERY, top_n=10, k=k)
+    assert all(r["relevance"] <= search.max_relevance(k) for r in results)
     # 3 chunks ranked 1st, 2nd, 3rd in both lists
-    assert api.max_relevance(k) == pytest.approx(2 * (1/21 + 1/22 + 1/23))
-
-
-# --- query embedding prefix ---
-
-class RecordingModel:
-    def __init__(self):
-        self.texts = []
-
-    def encode(self, text, **kwargs):
-        self.texts.append(text)
-        return AMBIENT_QUERY
-
-
-def test_embed_query_adds_the_bge_instruction_prefix(monkeypatch):
-    model = RecordingModel()
-    monkeypatch.setattr(api, "get_model", lambda: model)
-    api.embed_query("warm and unhurried")
-    assert model.texts == [api.QUERY_PREFIX + "warm and unhurried"]
-    assert api.QUERY_PREFIX.startswith("Represent this sentence for searching relevant passages")
-
-
-def test_embed_query_prefix_can_be_disabled(monkeypatch):
-    model = RecordingModel()
-    monkeypatch.setattr(api, "get_model", lambda: model)
-    monkeypatch.setattr(api, "QUERY_PREFIX", "")
-    api.embed_query("warm and unhurried")
-    assert model.texts == ["warm and unhurried"]
+    assert search.max_relevance(k) == pytest.approx(2 * (1/21 + 1/22 + 1/23))
