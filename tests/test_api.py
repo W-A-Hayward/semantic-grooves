@@ -1,0 +1,60 @@
+import api
+
+
+def test_health(client):
+    assert client.get("/api/health").get_json() == {"status": "ok"}
+
+
+def test_search_returns_ranked_unique_albums(client):
+    resp = client.post("/api/search", json={"query": "ambient", "top_n": 10, "k": 20})
+    assert resp.status_code == 200
+
+    results = resp.get_json()["results"]
+    assert results[0]["artist"] == "alpha"
+    assert set(results[0]) == {"reviewid", "tags", "artist", "title", "score", "url", "relevance"}
+    relevances = [r["relevance"] for r in results]
+    assert relevances == sorted(relevances, reverse=True)
+    reviewids = [r["reviewid"] for r in results]
+    assert len(reviewids) == len(set(reviewids))
+
+
+def test_defaults_apply(client):
+    assert client.post("/api/search", json={"query": "ambient"}).status_code == 200
+
+
+def test_missing_or_blank_query(client):
+    assert client.post("/api/search", json={}).status_code == 400
+    assert client.post("/api/search", json={"query": "   "}).status_code == 400
+    assert client.post("/api/search", json={"query": 42}).status_code == 400
+
+
+def test_non_json_body(client):
+    assert client.post("/api/search", data="nope").status_code == 400
+    assert client.post("/api/search", json=["a"]).status_code == 400
+
+
+def test_invalid_numeric_params(client):
+    for body in ({"top_n": 0}, {"top_n": 10_000}, {"top_n": "5"}, {"k": 0}, {"k": True}):
+        resp = client.post("/api/search", json={"query": "ambient", **body})
+        assert resp.status_code == 400, body
+
+
+def test_db_connection_is_closed_when_search_fails(client, monkeypatch):
+    closed = []
+
+    class FakeDb:
+        def cursor(self):
+            return None
+
+        def close(self):
+            closed.append(True)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(api, "get_db_connection", lambda: FakeDb())
+    monkeypatch.setattr(api, "search_albums", boom)
+
+    resp = client.post("/api/search", json={"query": "ambient"})
+    assert resp.status_code == 500
+    assert closed == [True]

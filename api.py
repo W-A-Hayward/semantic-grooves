@@ -13,6 +13,10 @@ DB_PATH = os.environ.get(
     "SG_DB_PATH", os.path.join(os.path.dirname(__file__), "database.sqlite")
 )
 
+# Number of candidate chunks fetched from each retriever (vector and lexical).
+CANDIDATES = 50
+MAX_TOP_N = 100
+
 _model = None
 
 
@@ -43,53 +47,51 @@ def sanitize_fts_query(query_text):
     return ' '.join(fts_query.split())
 
 
-def hybrid_search(cursor, query_text, query_vector, top_n=None, k=60):
-    """Perform hybrid search combining vector and lexical search."""
-    # 1. Get Vector Results (Ranked by distance)
+def hybrid_search(cursor, query_text, query_vector, top_n=None, k=60, candidates=CANDIDATES):
+    """Rank review chunks by combining vector and lexical search with RRF.
+
+    Returns a list of (rowid, rrf_score) sorted best first. A chunk's score is
+    the sum of 1 / (k + rank + 1) over the retrievers that returned it, so a
+    HIGHER score is a better match. `top_n` truncates the list when given.
+    """
+    # 1. Vector results (ranked by distance)
     vec_results = cursor.execute("""
-        SELECT rowid FROM reviews_vec 
-        WHERE embedding MATCH ? AND k = 50 
+        SELECT rowid FROM reviews_vec
+        WHERE embedding MATCH ? AND k = ?
         ORDER BY distance
-    """, (query_vector.tobytes(),)).fetchall()
-    
-    # 2. Get Lexical Results (Ranked by BM25 score)
+    """, (query_vector.tobytes(), candidates)).fetchall()
+
+    # 2. Lexical results (ranked by BM25)
     fts_results = []
     fts_query = sanitize_fts_query(query_text)
     if fts_query:
         try:
             fts_results = cursor.execute("""
-                SELECT rowid FROM review_text_fts 
-                WHERE review_text_fts MATCH ? 
-                ORDER BY rank LIMIT 50
-            """, (fts_query,)).fetchall()
+                SELECT rowid FROM review_text_fts
+                WHERE review_text_fts MATCH ?
+                ORDER BY rank LIMIT ?
+            """, (fts_query, candidates)).fetchall()
         except sqlite3.OperationalError as e:
-            # If FTS5 query fails, skip FTS search and log the error
+            # Malformed FTS5 query: fall back to vector-only results.
             print(f"FTS5 query error: {e}, query: {fts_query}")
-    
-    # 3. Combine using RRF
+
+    # 3. Reciprocal Rank Fusion
     scores = {}
-    
-    for rank, (rowid,) in enumerate(vec_results):
-        scores[rowid] = scores.get(rowid, 0) + 1.0 / (k + rank + 1)
-        
-    for rank, (rowid,) in enumerate(fts_results):
-        scores[rowid] = scores.get(rowid, 0) + 1.0 / (k + rank + 1)
-    
-    # Best score first (RRF: a higher score is a better match); rowid breaks
-    # ties so the order is deterministic.
-    sorted_ids = sorted(scores.items(), key=lambda item: (-item[1], item[0]))[:top_n]
-    return sorted_ids
+    for results in (vec_results, fts_results):
+        for rank, (rowid,) in enumerate(results):
+            scores[rowid] = scores.get(rowid, 0) + 1.0 / (k + rank + 1)
+
+    # Best score first; rowid breaks ties so the order is deterministic.
+    ranked = sorted(scores.items(), key=lambda item: (-item[1], item[0]))
+    return ranked[:top_n] if top_n is not None else ranked
 
 
 def search_albums(cursor, query_text, query_vector, top_n=20, k=20):
     """Hybrid search returning at most one result (the best chunk) per album."""
-    # Rank every candidate chunk first; top_n counts albums, not chunks.
     ranked = hybrid_search(cursor, query_text, query_vector, k=k)
     if not ranked:
         return []
 
-    # Fetch review details, keyed by chunk rowid so each result keeps the RRF
-    # score of its own chunk (a chunk without a matching review is skipped).
     placeholders = ', '.join(['?'] * len(ranked))
     rows = cursor.execute(f"""
         SELECT rt.rowid, rt.reviewid, rt.tags, r.artist, r.title, r.score, r.url
@@ -115,46 +117,59 @@ def search_albums(cursor, query_text, query_vector, top_n=20, k=20):
             'title': title,
             'score': score,
             'url': url,
-            'relevance': round(rrf_score, 4)
+            'relevance': round(rrf_score, 4),
         })
         if len(results) == top_n:
             break
     return results
 
 
+def parse_int(data, key, default, minimum, maximum):
+    """Read an integer request field, raising ValueError when out of range."""
+    value = data.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+        raise ValueError(f"'{key}' must be an integer between {minimum} and {maximum}")
+    return value
+
+
 @app.route('/api/search', methods=['POST'])
 def search():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({'error': 'A JSON object body is required'}), 400
+
+    query_text = data.get('query', '')
+    if not isinstance(query_text, str) or not query_text.strip():
+        return jsonify({'error': 'Query is required'}), 400
+
     try:
-        data = request.json
-        query_text = data.get('query', '')
-        top_n = data.get('top_n', 20)
-        k = data.get('k', 20)
-        
-        if not query_text:
-            return jsonify({'error': 'Query is required'}), 400
-        
-        # Encode query
+        top_n = parse_int(data, 'top_n', 20, 1, MAX_TOP_N)
+        k = parse_int(data, 'k', 20, 1, 1000)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+    try:
         query_embedded = get_model().encode(
-            query_text, 
-            convert_to_numpy=True, 
+            query_text,
+            convert_to_numpy=True,
             normalize_embeddings=True
         )
-        
-        # Perform search
+
         db = get_db_connection()
-        cursor = db.cursor()
-
-        results = search_albums(cursor, query_text, query_embedded, top_n=top_n, k=k)
-
-        db.close()
+        try:
+            results = search_albums(db.cursor(), query_text, query_embedded, top_n=top_n, k=k)
+        finally:
+            db.close()
         return jsonify({'results': results})
-        
+
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/api/health', methods=['GET'])
 def health():
     return jsonify({'status': 'ok'})
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
