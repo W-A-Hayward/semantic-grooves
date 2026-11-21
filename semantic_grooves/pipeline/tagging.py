@@ -4,6 +4,7 @@ Reads `content` (reviewid, content) and writes `review_tags` (reviewid, chunk,
 tags). Safe to interrupt and re-run: reviews that already have chunks are skipped.
 """
 import asyncio
+import re
 import time
 from collections import namedtuple
 
@@ -24,10 +25,17 @@ SCHEMA = """
     )
 """
 
+# The previous wording ("Return ONLY a comma-separated list of: Emotions, Feelings,
+# Instruments, Genres and effects") read like an output template, and in about a
+# quarter of answers the model echoed those category names back as tags. This
+# wording asks for descriptive tags and forbids the labels. No example tags are
+# given on purpose: the model copies them into unrelated answers.
 PROMPT = (
-    "Summarize the music review segment below. "
-    "Return ONLY a comma-separated list of: Emotions, Feelings, Instruments, Genres and effects. "
-    "Review segment: {text}"
+    "Read this excerpt from a music review and write short descriptive tags for it: the moods and "
+    "feelings it conveys, the instruments and genres it mentions or implies, and any notable sound "
+    "qualities. Answer with ONLY the tags on a single line, separated by commas. Never write the "
+    "words Emotions, Feelings, Instruments, Genres or Effects as labels or headings.\n\n"
+    "Excerpt: {text}"
 )
 
 
@@ -39,6 +47,56 @@ def report_error(message):
     if message not in _reported:
         _reported.add(message)
         print(message)
+
+
+# The model sometimes echoes the category names from the prompt instead of (or
+# around) the tags: "Emotions, Feelings, Genres - calm, folk", "Genres: rock",
+# "instruments(piano)". These words are never real tags.
+_LABEL = r"(?:emotions?|feelings?|instruments?|genres?|effects?)"
+_LABELS_ONLY = re.compile(rf"{_LABEL}(?:\s*(?:,|&|/|and)\s*{_LABEL})*", re.I)
+# "Genres: x", "Genres - x" (spaces required: "genre-bending" is a real word), "Genres(x)"
+_LABEL_PREFIX = re.compile(
+    rf"^{_LABEL}(?:\s*(?:,|&|/|and)\s*{_LABEL})*(?::\s*|\s+[\-\u2013\u2014]\s+|\s*\(\s*)", re.I)
+
+
+# Whole tags that say nothing: "none", "not specified", "instruments not mentioned", ...
+_FILLER = re.compile(
+    rf"(?:none|n/?a|unknown|unclear|unspecified|not applicable"
+    rf"|(?:{_LABEL}\s+)?not\s+(?:explicitly\s+|specifically\s+)?(?:mentioned|specified|stated|applicable|provided)"
+    rf"(?:\s+but\s+implied)?"
+    rf"|no\s+(?:specific\s+)?{_LABEL}\s+(?:mentioned|specified))",
+    re.I)
+
+
+def clean_tags(raw):
+    """Normalise a model answer into a clean comma-separated tag list.
+
+    Removes echoed category names (whole-tag "Emotions", "Genres: " prefixes,
+    "Instruments(...)" wrappers) and filler ("none", "not specified"), turns underscores into spaces, flattens
+    line breaks and bullets, drops empty and duplicate tags (case-insensitively)
+    and keeps the original casing and order. Returns None when nothing is left, so the chunk is retried later.
+    """
+    if not raw:
+        return None
+    tags, seen = [], set()
+    for tag in re.split(r"[,\n;]", raw):
+        tag = tag.replace("_", " ").strip().strip("\"'`*").strip()
+        tag = re.sub(r"^(?:[-\u2022*]|\d+[.)])\s+", "", tag)
+        while True:                               # "Genres: Instruments: rock" -> "rock"
+            stripped = _LABEL_PREFIX.sub("", tag, count=1)
+            if stripped == tag:
+                break
+            tag = stripped
+        tag = tag.strip().strip("\"'`*").rstrip(".").strip()
+        if tag.endswith(")") and "(" not in tag:  # leftover of "genres(rap, jazz)"
+            tag = tag.rstrip(")").strip()
+        if not tag or _LABELS_ONLY.fullmatch(tag) or _FILLER.fullmatch(tag):
+            continue
+        key = tag.lower()
+        if key not in seen:
+            seen.add(key)
+            tags.append(tag)
+    return ", ".join(tags) or None
 
 
 class TaggingError(RuntimeError):
@@ -78,14 +136,14 @@ def chunk_text(text, chunk_size=CHUNK_SIZE, overlap=OVERLAP):
 
 
 async def get_tags(client, text, model=DEFAULT_MODEL):
-    """Ask the LLM for the mood tags of one chunk; None when the call fails."""
+    """Ask the LLM for the mood tags of one chunk, cleaned; None when the call fails or yields nothing."""
     try:
         response = await client.generate(
             model=model,
             prompt=PROMPT.format(text=text),
             options={"temperature": 0, "num_ctx": 4096},
         )
-        return response['response'].strip()
+        return clean_tags(response['response'])
     except Exception as e:
         report_error(f"Error calling Ollama: {e}")
         return None
