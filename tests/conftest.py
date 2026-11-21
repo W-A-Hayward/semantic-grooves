@@ -91,3 +91,80 @@ def client(db_path, monkeypatch):
     monkeypatch.setattr(embedding, "get_model", lambda: StubModel())
     api.app.config["TESTING"] = True
     return api.app.test_client()
+
+
+# ---- build-pipeline fixtures -------------------------------------------------
+
+# reviewid -> review text. Chunked at 400/50 these give 3 + 1 + 1 chunks:
+# review 1 is long, review 2 is short, review 3 ends in a tail under 100 chars.
+SOURCE_CONTENT = {
+    1: ("slow ambient drone. " * 45)[:900],
+    2: "short and sweet punk blast",
+    3: ("quiet piano and sax. " * 20)[:420],
+}
+
+
+@pytest.fixture
+def source_db_path(tmp_path):
+    """A database as downloaded from Kaggle: reviews + content, nothing built yet."""
+    path = tmp_path / "source.sqlite"
+    db = sqlite3.connect(path)
+    db.execute("""CREATE TABLE reviews (
+        reviewid INTEGER, title TEXT, artist TEXT, url TEXT, score REAL)""")
+    db.execute("CREATE TABLE content (reviewid INTEGER, content TEXT)")
+    db.executemany("INSERT INTO reviews VALUES (?, ?, ?, ?, ?)", REVIEWS)
+    db.executemany("INSERT INTO content VALUES (?, ?)", SOURCE_CONTENT.items())
+    db.commit()
+    db.close()
+    return str(path)
+
+
+@pytest.fixture
+def tagged_db_path(tmp_path):
+    """A database after `build-tags`: reviews + review_tags, no indexes yet."""
+    path = tmp_path / "tagged.sqlite"
+    db = sqlite3.connect(path)
+    db.execute("""CREATE TABLE reviews (
+        reviewid INTEGER, title TEXT, artist TEXT, url TEXT, score REAL)""")
+    db.execute("""CREATE TABLE review_tags (
+        reviewid INTEGER REFERENCES reviews(reviewid), chunk NVARCHAR, tags NVARCHAR)""")
+    db.executemany("INSERT INTO reviews VALUES (?, ?, ?, ?, ?)", REVIEWS)
+    for rowid, reviewid, tags, chunk, _ in CHUNKS:
+        db.execute("INSERT INTO review_tags(rowid, reviewid, chunk, tags) VALUES (?, ?, ?, ?)",
+                   (rowid, reviewid, chunk, tags))
+    db.commit()
+    db.close()
+    return str(path)
+
+
+class StubOllama:
+    """Stands in for ollama.AsyncClient: every chunk is tagged 'calm, piano'."""
+
+    def __init__(self, fail_on=()):
+        self.prompts = []
+        self.fail_on = fail_on
+
+    async def generate(self, model, prompt, options):
+        self.prompts.append(prompt)
+        if any(text in prompt for text in self.fail_on):
+            raise RuntimeError("model unavailable")
+        return {"response": "  calm, piano  "}
+
+
+class StubEmbedder:
+    """Stands in for SentenceTransformer: deterministic 4-d vectors from the text."""
+
+    def __init__(self):
+        self.calls = []
+
+    def get_sentence_embedding_dimension(self):
+        return DIM
+
+    def encode(self, texts, **kwargs):
+        import zlib
+        self.calls.append(list(texts))
+        rows = []
+        for text in texts:
+            h = zlib.crc32(text.encode())
+            rows.append(vec(1 + h % 7, 1 + (h >> 3) % 7, 1 + (h >> 6) % 7, 1 + (h >> 9) % 7))
+        return np.array(rows, dtype=np.float32)
