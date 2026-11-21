@@ -105,3 +105,9 @@ def test_vector_dimension_follows_the_model(db):
     indexing.build_index(db, model=StubEmbedder(), progress=quiet)
     blob = db.execute("SELECT embedding FROM reviews_vec LIMIT 1").fetchone()[0]
     assert len(blob) == 4 * 4                                 # 4 float32 values
+
+
+def test_build_index_also_prepares_the_database(db):
+    indexing.build_index(db, model=StubEmbedder(), progress=quiet)
+    names = {n for (n,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    assert {"reviews_reviewid", "review_tags_reviewid"} <= names

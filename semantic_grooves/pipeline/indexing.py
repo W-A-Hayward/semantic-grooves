@@ -5,6 +5,7 @@ Reads `review_tags` and writes `reviews_vec` (sqlite-vec) and `review_text_fts`
 interrupted run resumes where it stopped. Use rebuild=True to start from scratch.
 """
 from .. import embedding
+from .prepare import prepare_database
 
 BATCH_SIZE = 128   # sentences per model call (tune to GPU memory)
 COMMIT_EVERY = 4096  # chunks embedded between commits
@@ -35,6 +36,7 @@ def build_index(db, model=None, batch_size=BATCH_SIZE, rebuild=False, progress=p
     Returns the number of chunks newly embedded.
     """
     model = model or embedding.get_model()
+    prepare_database(db)
     if rebuild:
         db.execute("DROP TABLE IF EXISTS reviews_vec")
         db.execute("DROP TABLE IF EXISTS review_text_fts")

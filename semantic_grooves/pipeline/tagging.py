@@ -7,6 +7,8 @@ import asyncio
 import time
 from collections import namedtuple
 
+from .prepare import prepare_database
+
 DEFAULT_MODEL = "qwen2.5:7b"
 CHUNK_SIZE = 400
 OVERLAP = 50
@@ -140,7 +142,7 @@ async def run(db, client=None, model=DEFAULT_MODEL, batch_size=BATCH_SIZE,
     tags, which means the model is unreachable rather than one review being odd.
     """
     db.execute(SCHEMA)
-    db.commit()
+    prepare_database(db)
     _reported.clear()
     client = client or make_client()
     options = dict(model=model, chunk_size=chunk_size, overlap=overlap)

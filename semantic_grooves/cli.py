@@ -29,6 +29,9 @@ def build_parser():
     p.add_argument("--force", action="store_true", help="overwrite an existing database")
     p.set_defaults(handler=cmd_fetch_data)
 
+    p = sub.add_parser("prepare-db", help="remove duplicate reviews and add indexes (safe to repeat)")
+    p.set_defaults(handler=cmd_prepare_db)
+
     p = sub.add_parser("build-tags", help="chunk reviews and tag their mood with Ollama (slow)")
     p.add_argument("--model", default=None, help="Ollama model (default qwen2.5:7b)")
     p.add_argument("--batch-size", type=int, default=None, help="reviews tagged concurrently (default 10)")
@@ -73,11 +76,26 @@ def cmd_search(args):
 def cmd_fetch_data(args):
     from .pipeline.dataset import fetch_data
     try:
-        dest = fetch_data(args.dest, force=args.force)
+        fetched = fetch_data(args.dest, force=args.force)
     except (FileExistsError, FileNotFoundError, RuntimeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    print(f"Saved {dest}")
+    print(f"Saved {fetched.path}")
+    if fetched.duplicates_removed:
+        print(f"Removed {fetched.duplicates_removed} duplicate review rows.")
+    return 0
+
+
+def cmd_prepare_db(args):
+    from .db import connect
+    from .pipeline.prepare import prepare_database
+
+    db = connect()
+    try:
+        removed = prepare_database(db)
+    finally:
+        db.close()
+    print(f"Removed {removed} duplicate rows. Indexes are in place.")
     return 0
 
 

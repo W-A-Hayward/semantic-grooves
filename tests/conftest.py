@@ -168,3 +168,20 @@ class StubEmbedder:
             h = zlib.crc32(text.encode())
             rows.append(vec(1 + h % 7, 1 + (h >> 3) % 7, 1 + (h >> 6) % 7, 1 + (h >> 9) % 7))
         return np.array(rows, dtype=np.float32)
+
+
+def build_kaggle_db(path, duplicates=True):
+    """A Kaggle-shaped database (reviews + content). With `duplicates`, review 2 is
+    listed twice as an exact copy, like 4 reviews are in the real dataset."""
+    db = sqlite3.connect(path)
+    db.execute("""CREATE TABLE reviews (
+        reviewid INTEGER, title TEXT, artist TEXT, url TEXT, score REAL)""")
+    db.execute("CREATE TABLE content (reviewid INTEGER, content TEXT)")
+    db.executemany("INSERT INTO reviews VALUES (?, ?, ?, ?, ?)", REVIEWS)
+    db.executemany("INSERT INTO content VALUES (?, ?)", SOURCE_CONTENT.items())
+    if duplicates:
+        db.execute("INSERT INTO reviews VALUES (?, ?, ?, ?, ?)", REVIEWS[1])
+        db.execute("INSERT INTO content VALUES (?, ?)", (2, SOURCE_CONTENT[2]))
+    db.commit()
+    db.close()
+    return str(path)

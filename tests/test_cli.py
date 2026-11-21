@@ -2,7 +2,7 @@ import sqlite3
 
 import pytest
 
-from conftest import CHUNKS, StubEmbedder, StubModel, StubOllama
+from conftest import CHUNKS, StubEmbedder, StubModel, StubOllama, build_kaggle_db
 from semantic_grooves import cli, embedding, search
 from semantic_grooves.pipeline import dataset, tagging
 
@@ -62,23 +62,33 @@ def test_serve_passes_host_port_and_debug_to_flask(monkeypatch):
 def fake_kaggle(tmp_path, monkeypatch):
     folder = tmp_path / "kaggle-cache"
     folder.mkdir()
-    (folder / "database.sqlite").write_bytes(b"downloaded")
+    build_kaggle_db(folder / "database.sqlite")          # contains one duplicated review
     monkeypatch.setattr(dataset, "download_dataset", lambda: folder)
 
 
-def test_fetch_data_copies_the_database(fake_kaggle, tmp_path, capsys):
+def count_reviews(path):
+    db = sqlite3.connect(path)
+    try:
+        return db.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+    finally:
+        db.close()
+
+
+def test_fetch_data_copies_and_cleans_the_database(fake_kaggle, tmp_path, capsys):
     dest = tmp_path / "out" / "database.sqlite"
     assert cli.main(["fetch-data", "--dest", str(dest)]) == 0
-    assert dest.read_bytes() == b"downloaded"
+
+    assert count_reviews(dest) == 3                      # the duplicate row is gone
     assert not (tmp_path / "out" / "database.sqlite.part").exists()
-    assert "Saved" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "Saved" in out and "Removed 2 duplicate review rows." in out
 
 
 def test_fetch_data_uses_sg_db_path_by_default(fake_kaggle, tmp_path, monkeypatch):
     dest = tmp_path / "from-env.sqlite"
     monkeypatch.setenv("SG_DB_PATH", str(dest))
     assert cli.main(["fetch-data"]) == 0
-    assert dest.exists()
+    assert count_reviews(dest) == 3
 
 
 def test_fetch_data_never_overwrites_without_force(fake_kaggle, tmp_path, capsys):
@@ -90,7 +100,31 @@ def test_fetch_data_never_overwrites_without_force(fake_kaggle, tmp_path, capsys
     assert "--force" in capsys.readouterr().err
 
     assert cli.main(["fetch-data", "--dest", str(dest), "--force"]) == 0
-    assert dest.read_bytes() == b"downloaded"
+    assert count_reviews(dest) == 3
+
+
+def test_fetch_data_rejects_a_file_that_is_not_a_database(tmp_path, monkeypatch, capsys):
+    folder = tmp_path / "kaggle-cache"
+    folder.mkdir()
+    (folder / "database.sqlite").write_bytes(b"this is not sqlite, " * 100)
+    monkeypatch.setattr(dataset, "download_dataset", lambda: folder)
+    dest = tmp_path / "database.sqlite"
+
+    assert cli.main(["fetch-data", "--dest", str(dest)]) == 1
+    assert "not a usable SQLite database" in capsys.readouterr().err
+    assert not dest.exists() and not (tmp_path / "database.sqlite.part").exists()
+
+
+def test_prepare_db_cleans_an_existing_database(tmp_path, monkeypatch, capsys):
+    path = build_kaggle_db(tmp_path / "old.sqlite")
+    monkeypatch.setenv("SG_DB_PATH", path)
+
+    assert cli.main(["prepare-db"]) == 0
+    assert "Removed 2 duplicate rows. Indexes are in place." in capsys.readouterr().out
+    assert count_reviews(path) == 3
+
+    assert cli.main(["prepare-db"]) == 0                 # safe to repeat
+    assert "Removed 0 duplicate rows." in capsys.readouterr().out
 
 
 def test_fetch_data_explains_a_missing_kagglehub(tmp_path, monkeypatch, capsys):

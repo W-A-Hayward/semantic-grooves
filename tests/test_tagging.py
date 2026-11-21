@@ -144,3 +144,19 @@ def test_an_isolated_failure_does_not_abort_the_run(source_db):
     result = asyncio.run(tagging.run(source_db, client=StubOllama(fail_on=["short and sweet"]),
                                      progress=lambda m: None))
     assert result.failed == 1 and result.tagged == 2
+
+
+# --- the preparation step runs as part of tagging ---
+
+def test_run_dedupes_the_source_and_indexes_review_tags(tmp_path):
+    from conftest import build_kaggle_db
+    db = sqlite3.connect(build_kaggle_db(tmp_path / "dup.sqlite"))
+
+    result = asyncio.run(tagging.run(db, client=StubOllama(), progress=lambda m: None))
+
+    assert result.tagged == 3                                  # review 2 is tagged once, not twice
+    chunks_of_2 = db.execute("SELECT COUNT(*) FROM review_tags WHERE reviewid = 2").fetchone()[0]
+    assert chunks_of_2 == 1
+    names = {n for (n,) in db.execute("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    assert "review_tags_reviewid" in names
+    db.close()
