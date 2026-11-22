@@ -1,0 +1,24 @@
+# Run the search app on http://localhost:8000
+#
+#   cp .env.example .env     # then set SG_DB_URL and SG_DB_SHA256
+#   docker compose up --build
+#
+# The database is downloaded on first start into the `sg-data` volume. To use a
+# database you already have instead, skip compose and mount it:
+#   docker build -t semantic-grooves .
+#   docker run -p 8000:8000 -v "$PWD/data:/data:ro" semantic-grooves
+services:
+  web:
+    build: .
+    image: semantic-grooves
+    ports:
+      - "8000:8000"
+    environment:
+      SG_DB_URL: ${SG_DB_URL:-}
+      SG_DB_SHA256: ${SG_DB_SHA256:-}
+    volumes:
+      - sg-data:/data
+    restart: unless-stopped
+
+volumes:
+  sg-data:

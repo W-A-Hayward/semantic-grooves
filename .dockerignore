@@ -1,0 +1,29 @@
+# Keep the build context small and free of local data and secrets.
+.git
+.github
+.venv
+venv
+.env
+.env.*
+**/__pycache__
+**/*.pyc
+.pytest_cache
+*.egg-info
+build
+dist
+data
+
+# The database (1.2 GB) is mounted or downloaded at run time, never baked in.
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+*.part
+dump.sql
+archive*.zip
+
+frontend/node_modules
+frontend/dist
+
+tests
+docker/*.md
