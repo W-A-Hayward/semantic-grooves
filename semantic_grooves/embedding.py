@@ -12,15 +12,22 @@ QUERY_PREFIX = os.environ.get(
 _model = None
 
 
+def resolve_device():
+    """The torch device: $SG_DEVICE ("cpu", "cuda", ...) or CUDA/ROCm when available."""
+    device = os.environ.get("SG_DEVICE")
+    if device:
+        return device
+    import torch
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+
 def get_model():
     """Load the embedding model on first use (keeps imports and tests cheap)."""
     global _model
     if _model is None:
-        import torch
         from sentence_transformers import SentenceTransformer
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        _model = SentenceTransformer(MODEL_NAME, device=device)
+        _model = SentenceTransformer(MODEL_NAME, device=resolve_device())
     return _model
 
 
