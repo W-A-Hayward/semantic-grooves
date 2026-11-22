@@ -193,3 +193,24 @@ def test_build_index_indexes_the_tagged_chunks(tagged_db_path, monkeypatch, caps
 
     assert cli.main(["build-index"]) == 0
     assert "Indexed 0 new chunks." in capsys.readouterr().out
+
+
+# --- serve --static ---
+
+def test_serve_can_serve_a_built_frontend(tmp_path, monkeypatch):
+    from flask import Flask
+    from semantic_grooves import api
+    site = tmp_path / "dist"
+    site.mkdir()
+    (site / "index.html").write_text("<html>hi</html>")
+    registered, ran = [], []
+    monkeypatch.setattr(api, "register_frontend", lambda app, d: registered.append(str(d)))
+    monkeypatch.setattr(api.app, "run", lambda **kw: ran.append(kw))
+
+    assert cli.main(["serve", "--static", str(site)]) == 0
+    assert registered == [str(site)] and ran
+
+
+def test_serve_reports_a_missing_frontend_build(tmp_path, capsys):
+    assert cli.main(["serve", "--static", str(tmp_path / "nope")]) == 1
+    assert "index.html" in capsys.readouterr().err

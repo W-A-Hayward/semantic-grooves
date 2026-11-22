@@ -1,7 +1,10 @@
-"""Flask API: POST /api/search and GET /api/health."""
-from flask import Flask, request, jsonify
+"""Flask API: POST /api/search and GET /api/health, optionally serving the built frontend."""
+from pathlib import Path
+
+from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
+from .config import static_dir
 from .db import connect
 from .embedding import embed_query
 from .search import max_relevance, search_albums
@@ -67,3 +70,28 @@ def health():
     except Exception as e:
         return jsonify({'status': 'unavailable', 'error': str(e)}), 503
     return jsonify({'status': 'ok'})
+
+
+def register_frontend(flask_app, directory):
+    """Serve a built single-page frontend (e.g. frontend/dist) from `flask_app`.
+
+    Real files are served as they are (hashed files under assets/ with a long
+    cache lifetime); any other path returns index.html so client-side routes
+    work. Unknown /api/ paths stay a JSON 404 instead of falling back to the page.
+    """
+    root = Path(directory).resolve()
+    if not (root / "index.html").is_file():
+        raise FileNotFoundError(f"no index.html in {root} (run `npm run build` in frontend/)")
+
+    @flask_app.get("/", defaults={"path": ""})
+    @flask_app.get("/<path:path>")
+    def frontend(path):
+        if path == "api" or path.startswith("api/"):
+            return jsonify({'error': 'Not found'}), 404
+        if path and (root / path).is_file():
+            return send_from_directory(root, path, max_age=31536000 if path.startswith("assets/") else 0)
+        return send_from_directory(root, "index.html", max_age=0)
+
+
+if static_dir():
+    register_frontend(app, static_dir())

@@ -16,6 +16,8 @@ def build_parser():
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=5000)
     p.add_argument("--debug", action="store_true", help="Flask debug mode (auto-reload, never for production)")
+    p.add_argument("--static", metavar="DIR", default=None,
+                   help="also serve the built frontend from DIR (default: $SG_STATIC_DIR)")
     p.set_defaults(handler=cmd_serve)
 
     p = sub.add_parser("search", help="search from the terminal")
@@ -47,7 +49,13 @@ def build_parser():
 
 
 def cmd_serve(args):
-    from .api import app
+    from .api import app, register_frontend
+    if args.static:
+        try:
+            register_frontend(app, args.static)
+        except FileNotFoundError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return 1
     app.run(host=args.host, port=args.port, debug=args.debug)
     return 0
 
