@@ -57,4 +57,13 @@ def search():
 
 @app.route('/api/health', methods=['GET'])
 def health():
+    """200 when the database can be opened and read, 503 otherwise."""
+    try:
+        db = get_db_connection()
+        try:
+            db.execute("SELECT 1 FROM review_tags LIMIT 1").fetchone()
+        finally:
+            db.close()
+    except Exception as e:
+        return jsonify({'status': 'unavailable', 'error': str(e)}), 503
     return jsonify({'status': 'ok'})

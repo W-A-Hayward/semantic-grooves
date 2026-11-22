@@ -80,7 +80,22 @@ def test_search_embeds_the_query_with_the_prefix(client, monkeypatch):
     assert seen == [embedding.QUERY_PREFIX + "ambient"]
 
 
-# --- read-only access ---
+# --- health and read-only access ---
+
+def test_health_is_unavailable_when_the_database_is_missing(tmp_path, monkeypatch):
+    monkeypatch.setenv("SG_DB_PATH", str(tmp_path / "missing.sqlite"))
+    resp = api.app.test_client().get("/api/health")
+    assert resp.status_code == 503
+    body = resp.get_json()
+    assert body["status"] == "unavailable" and "error" in body
+
+
+def test_health_is_unavailable_when_the_file_is_not_a_database(tmp_path, monkeypatch):
+    junk = tmp_path / "junk.sqlite"
+    junk.write_bytes(b"not sqlite " * 50)
+    monkeypatch.setenv("SG_DB_PATH", str(junk))
+    assert api.app.test_client().get("/api/health").status_code == 503
+
 
 def test_the_api_opens_the_database_read_only(client):
     import sqlite3
