@@ -20,10 +20,23 @@ dependencies = [
 [project.optional-dependencies]
 # Only needed to rebuild the database from scratch.
 build = ["kagglehub>=0.3", "ollama>=0.4"]
+# Production web server (used by the Docker image).
+prod = ["gunicorn>=22"]
 dev = ["pytest>=8"]
 
 [project.scripts]
 sg = "semantic_grooves.cli:main"
+
+# uv installs CPU-only torch on Linux: the default PyPI wheel is a CUDA build that is
+# several GB larger and useless without an NVIDIA GPU. For a GPU, install the matching
+# torch yourself (or run `uv sync --no-sources` for the PyPI default). pip ignores this.
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 
 [tool.setuptools.packages.find]
 include = ["semantic_grooves*"]
