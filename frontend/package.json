@@ -46,7 +46,6 @@
     "input-otp": "1.4.1",
     "lucide-react": "^0.544.0",
     "react": "^19",
-    "react-day-picker": "^9.13.1",
     "react-dom": "^19",
     "react-hook-form": "^7.54.1",
     "react-resizable-panels": "^2.1.7",
