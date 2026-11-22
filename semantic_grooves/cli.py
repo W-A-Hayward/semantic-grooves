@@ -128,15 +128,19 @@ def cmd_fetch_data(args):
 
 def cmd_prepare_db(args):
     from .db import connect
-    from .pipeline.prepare import prepare_database
+    from .pipeline.prepare import prepare_database, use_rollback_journal
 
     db = connect()
     try:
         prepared = prepare_database(db)
+        journal = use_rollback_journal(db)
     finally:
         db.close()
     print(f"Removed {prepared.duplicate_rows} duplicate rows and {prepared.duplicate_chunks} duplicate chunks. "
-          "Indexes are in place.")
+          f"Indexes are in place. Journal mode: {journal}.")
+    if journal.lower() != "delete":
+        print("warning: could not leave WAL mode (is another process using the database?); "
+              "it cannot be mounted read-only until it does", file=sys.stderr)
     return 0
 
 

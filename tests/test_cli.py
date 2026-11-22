@@ -272,3 +272,71 @@ def test_download_db_rejects_a_tampered_file(published, tmp_path, capsys):
     assert cli.main(["download-db", "--url", url, "--sha256", "f" * 64, "--dest", str(dest)]) == 1
     assert "checksum mismatch" in capsys.readouterr().err
     assert not dest.exists()
+
+
+# --- read-only deployment (WAL databases cannot be opened from a read-only directory) ---
+
+import os
+
+needs_non_root = pytest.mark.skipif(os.geteuid() == 0, reason="root ignores file permissions")
+
+
+def wal_database(tmp_path, source):
+    """A copy of the fixture database in WAL mode, inside a directory we can lock down."""
+    folder = tmp_path / "data"
+    folder.mkdir()
+    path = folder / "database.sqlite"
+    shutil.copy(source, path)
+    db = sqlite3.connect(path)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.commit()
+    db.close()
+    for leftover in folder.iterdir():
+        if leftover.name != "database.sqlite":
+            leftover.unlink()
+    return path
+
+
+def lock_down(path):
+    os.chmod(path, 0o444)
+    os.chmod(path.parent, 0o555)
+
+
+def unlock(path):
+    os.chmod(path.parent, 0o755)
+    os.chmod(path, 0o644)
+
+
+def test_prepare_db_takes_the_database_out_of_wal_mode(db_path, tmp_path, monkeypatch, capsys):
+    from semantic_grooves.db import is_wal
+    path = wal_database(tmp_path, db_path)
+    monkeypatch.setenv("SG_DB_PATH", str(path))
+    assert is_wal(path)
+
+    assert cli.main(["prepare-db"]) == 0
+
+    assert "Journal mode: delete." in capsys.readouterr().out
+    assert not is_wal(path)
+
+
+@needs_non_root
+def test_a_wal_database_cannot_be_served_read_only_until_prepared(db_path, tmp_path, monkeypatch):
+    from semantic_grooves import api
+    path = wal_database(tmp_path, db_path)
+    monkeypatch.setenv("SG_DB_PATH", str(path))
+    client = api.app.test_client()
+
+    lock_down(path)
+    try:
+        resp = client.get("/api/health")
+        assert resp.status_code == 503
+        assert "WAL mode" in resp.get_json()["error"] and "sg prepare-db" in resp.get_json()["error"]
+    finally:
+        unlock(path)
+
+    assert cli.main(["prepare-db"]) == 0
+    lock_down(path)
+    try:
+        assert client.get("/api/health").get_json() == {"status": "ok"}
+    finally:
+        unlock(path)

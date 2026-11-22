@@ -7,6 +7,16 @@ import sqlite_vec
 from .config import db_path
 
 
+def is_wal(path):
+    """True when the SQLite file at `path` is in WAL journal mode (read from its header)."""
+    try:
+        with open(path, "rb") as f:
+            header = f.read(20)
+    except OSError:
+        return False
+    return len(header) == 20 and header[:16] == b"SQLite format 3\x00" and header[18] == 2
+
+
 def connect(path=None, read_only=False):
     """Open a connection to the search database (default: config.db_path()).
 

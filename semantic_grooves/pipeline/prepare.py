@@ -62,6 +62,17 @@ def create_indexes(db):
         db.execute("CREATE INDEX IF NOT EXISTS review_tags_reviewid ON review_tags(reviewid)")
 
 
+def use_rollback_journal(db):
+    """Switch the database out of WAL mode; returns the journal mode it ends up in.
+
+    A WAL database cannot be opened from a read-only location (a `:ro` Docker mount, a
+    read-only file system): SQLite must create a `-shm` file next to it. The default
+    rollback journal has no such need. Needs exclusive access, so the result is still
+    "wal" if another process has the database open.
+    """
+    return db.execute("PRAGMA journal_mode=DELETE").fetchone()[0]
+
+
 def prepare_database(db):
     """Dedupe, then index; returns Prepared(duplicate_rows, duplicate_chunks)."""
     duplicate_rows = remove_duplicate_reviews(db)

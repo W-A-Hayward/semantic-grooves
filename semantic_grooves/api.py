@@ -4,8 +4,8 @@ from pathlib import Path
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
-from .config import static_dir
-from .db import connect
+from .config import db_path, static_dir
+from .db import connect, is_wal
 from .embedding import embed_query
 from .search import max_relevance, search_albums
 
@@ -68,7 +68,11 @@ def health():
         finally:
             db.close()
     except Exception as e:
-        return jsonify({'status': 'unavailable', 'error': str(e)}), 503
+        error = str(e)
+        if is_wal(db_path()):
+            error += (" (the database is in WAL mode, which cannot be opened from a read-only "
+                      "location: run `sg prepare-db` on it, or mount its folder read-write)")
+        return jsonify({'status': 'unavailable', 'error': error}), 503
     return jsonify({'status': 'ok'})
 
 

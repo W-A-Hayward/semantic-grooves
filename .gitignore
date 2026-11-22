@@ -12,3 +12,6 @@ db/
 *.egg-info/
 dist/
 build/
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal

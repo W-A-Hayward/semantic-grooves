@@ -5,7 +5,7 @@ import pytest
 from conftest import AMBIENT_QUERY, CHUNKS, REVIEWS, SOURCE_CONTENT, build_kaggle_db
 from semantic_grooves import search
 from semantic_grooves.db import connect
-from semantic_grooves.pipeline.prepare import prepare_database
+from semantic_grooves.pipeline.prepare import prepare_database, use_rollback_journal
 
 
 @pytest.fixture
@@ -119,3 +119,21 @@ def test_the_same_text_under_different_reviews_is_not_a_duplicate(db):
     db.executemany("INSERT INTO review_tags VALUES (?, 'identical text', 'tag')", [(1,), (2,)])
     assert prepare_database(db).duplicate_chunks == 0
     assert db.execute("SELECT COUNT(*) FROM review_tags").fetchone()[0] == 2
+
+
+# --- leaving WAL mode (needed to open a database from a read-only location) ---
+
+def test_use_rollback_journal_leaves_wal_mode(tmp_path):
+    from semantic_grooves.db import is_wal
+    path = tmp_path / "wal.sqlite"
+    db = sqlite3.connect(path)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("CREATE TABLE t (x)")
+    db.commit()
+    assert is_wal(path)
+
+    assert use_rollback_journal(db) == "delete"
+    assert not is_wal(path)
+    assert use_rollback_journal(db) == "delete"              # idempotent
+    db.close()
+    assert not any(p.name.endswith(("-wal", "-shm")) for p in tmp_path.iterdir())
