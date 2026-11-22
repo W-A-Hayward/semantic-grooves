@@ -1,3 +1,5 @@
+import hashlib
+import shutil
 import sqlite3
 
 import pytest
@@ -214,3 +216,59 @@ def test_serve_can_serve_a_built_frontend(tmp_path, monkeypatch):
 def test_serve_reports_a_missing_frontend_build(tmp_path, capsys):
     assert cli.main(["serve", "--static", str(tmp_path / "nope")]) == 1
     assert "index.html" in capsys.readouterr().err
+
+
+# --- download-db ---
+
+@pytest.fixture
+def published(db_path, tmp_path):
+    path = tmp_path / "published" / "database.sqlite"
+    path.parent.mkdir()
+    shutil.copy(db_path, path)
+    return path.as_uri(), hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_download_db_installs_a_verified_database(published, tmp_path, capsys):
+    url, digest = published
+    dest = tmp_path / "data" / "database.sqlite"
+    assert cli.main(["download-db", "--url", url, "--sha256", digest, "--dest", str(dest)]) == 0
+    assert "Saved" in capsys.readouterr().out
+    assert hashlib.sha256(dest.read_bytes()).hexdigest() == digest
+
+
+def test_download_db_reads_url_and_checksum_from_the_environment(published, tmp_path, monkeypatch):
+    url, digest = published
+    dest = tmp_path / "database.sqlite"
+    monkeypatch.setenv("SG_DB_URL", url)
+    monkeypatch.setenv("SG_DB_SHA256", digest)
+    monkeypatch.setenv("SG_DB_PATH", str(dest))
+    assert cli.main(["download-db"]) == 0
+    assert dest.exists()
+
+
+def test_download_db_needs_a_url(monkeypatch, capsys):
+    monkeypatch.delenv("SG_DB_URL", raising=False)
+    assert cli.main(["download-db"]) == 1
+    assert "no URL" in capsys.readouterr().err
+
+
+def test_download_db_needs_a_checksum_unless_told_otherwise(published, tmp_path, monkeypatch, capsys):
+    url, _ = published
+    monkeypatch.delenv("SG_DB_SHA256", raising=False)
+    dest = tmp_path / "database.sqlite"
+
+    assert cli.main(["download-db", "--url", url, "--dest", str(dest)]) == 1
+    assert "no checksum" in capsys.readouterr().err
+    assert not dest.exists()
+
+    assert cli.main(["download-db", "--url", url, "--dest", str(dest), "--no-verify"]) == 0
+    assert "skipping checksum" in capsys.readouterr().err
+    assert dest.exists()
+
+
+def test_download_db_rejects_a_tampered_file(published, tmp_path, capsys):
+    url, _ = published
+    dest = tmp_path / "database.sqlite"
+    assert cli.main(["download-db", "--url", url, "--sha256", "f" * 64, "--dest", str(dest)]) == 1
+    assert "checksum mismatch" in capsys.readouterr().err
+    assert not dest.exists()

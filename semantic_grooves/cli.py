@@ -26,6 +26,14 @@ def build_parser():
     p.add_argument("-k", type=int, default=20, help="RRF constant (default 20)")
     p.set_defaults(handler=cmd_search)
 
+    p = sub.add_parser("download-db", help="download a prebuilt database (checksum verified)")
+    p.add_argument("--url", default=None, help="where to download it (default: $SG_DB_URL)")
+    p.add_argument("--sha256", default=None, help="expected SHA-256 of the file (default: $SG_DB_SHA256)")
+    p.add_argument("--dest", help="where to put it (default: $SG_DB_PATH or ./database.sqlite)")
+    p.add_argument("--force", action="store_true", help="overwrite an existing database")
+    p.add_argument("--no-verify", action="store_true", help="skip the checksum (not recommended)")
+    p.set_defaults(handler=cmd_download_db)
+
     p = sub.add_parser("fetch-data", help="download the Pitchfork dataset from Kaggle")
     p.add_argument("--dest", help="where to put database.sqlite (default: $SG_DB_PATH or ./database.sqlite)")
     p.add_argument("--force", action="store_true", help="overwrite an existing database")
@@ -78,6 +86,30 @@ def cmd_search(args):
     for rank, r in enumerate(results, start=1):
         print(f"{rank:>2}. {r['artist']} - {r['title']}  (Pitchfork {r['score']}, relevance {r['relevance']})")
         print(f"      {r['tags']}")
+    return 0
+
+
+def cmd_download_db(args):
+    import os
+    from .download import ChecksumError, download_database
+
+    url = args.url or os.environ.get("SG_DB_URL")
+    sha256 = args.sha256 or os.environ.get("SG_DB_SHA256")
+    if not url:
+        print("error: no URL given (use --url or set SG_DB_URL)", file=sys.stderr)
+        return 1
+    if not sha256 and not args.no_verify:
+        print("error: no checksum given (use --sha256 or set SG_DB_SHA256, "
+              "or pass --no-verify to skip the check)", file=sys.stderr)
+        return 1
+    if args.no_verify:
+        print("warning: skipping checksum verification", file=sys.stderr)
+    try:
+        path = download_database(url, args.dest, sha256=None if args.no_verify else sha256, force=args.force)
+    except (ChecksumError, FileExistsError, OSError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    print(f"Saved {path}")
     return 0
 
 
