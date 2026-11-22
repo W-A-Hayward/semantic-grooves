@@ -58,7 +58,7 @@ def cmd_search(args):
     from .search import search_albums
 
     query = " ".join(args.query)
-    db = connect()
+    db = connect(read_only=True)
     try:
         results = search_albums(db.cursor(), query, embed_query(query), top_n=args.top_n, k=args.k)
     finally:

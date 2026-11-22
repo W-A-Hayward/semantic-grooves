@@ -13,8 +13,8 @@ MAX_TOP_N = 100
 
 
 def get_db_connection():
-    """Create a new database connection for each request."""
-    return connect()
+    """Create a new read-only database connection for each request."""
+    return connect(read_only=True)
 
 
 def parse_int(data, key, default, minimum, maximum):

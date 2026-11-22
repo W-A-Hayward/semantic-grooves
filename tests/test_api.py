@@ -78,3 +78,16 @@ def test_search_embeds_the_query_with_the_prefix(client, monkeypatch):
     monkeypatch.setattr(embedding, "get_model", lambda: Model())
     client.post("/api/search", json={"query": "ambient"})
     assert seen == [embedding.QUERY_PREFIX + "ambient"]
+
+
+# --- read-only access ---
+
+def test_the_api_opens_the_database_read_only(client):
+    import sqlite3
+    import pytest
+    db = api.get_db_connection()
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="readonly"):
+            db.execute("DELETE FROM review_tags")
+    finally:
+        db.close()
