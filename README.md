@@ -47,7 +47,7 @@ An album matched by several passages outranks one matched by a single passage. H
 |---|---|
 | Corpus | 18,389 reviews (the Kaggle dataset lists 4 of them twice; `sg prepare-db` removes the duplicates), 217,152 chunks (389 characters on average) |
 | Index | one 1.2 GB SQLite file: metadata, tags, vectors, full-text index |
-| Latency | about 0.5 s per warm query on an AMD GPU (ROCm); 23 s cold start; CPU not measured |
+| Latency | about 0.5 s per warm query on an AMD GPU (ROCm), 0.56&ndash;0.61 s on CPU only (16 cores); the model loads in about 10&ndash;23 s; a worker uses about 1.7 GB of RAM |
 | Stack | Python 3.12 &middot; Flask &middot; sentence-transformers &middot; sqlite-vec &middot; React + Vite |
 
 **Why one SQLite file:** no vector database to run, trivially copyable, joins are plain SQL. The cost is a brute-force scan that won't scale to many millions of chunks, and a 1.2 GB file to ship.
@@ -69,20 +69,41 @@ No labelled quality data exists yet, so every change below was checked against a
 - **Tag noise in the current data.** The tagging model used to echo the prompt's category names as tags: 20% of the stored chunks (43,860) carry *"Emotions"*, *"Feelings"*, *"Genres: ..."* and the like, and those words are embedded with the real tags. New builds cannot produce this: the prompt no longer reads like an output template (echoes fell from 25% to 0% on 60 real chunks, and from 19% to 0% in a 20-review end-to-end run) and every answer is cleaned before it is stored. Existing tags are unchanged, and cleaning them takes a re-tag or a re-embed.
 - **Corpus bias:** Pitchfork only, 1999&ndash;2017.
 - **No evaluation set.** The next step is about 30 judged mood queries to settle the open questions above.
-- **Rebuilding is heavy:** tagging needs Ollama (about 20 hours) and embedding wants a GPU. The prebuilt database is not distributed yet, and `npm run build` fails on a type error in `components/ui/calendar.tsx` (`npm run dev` works).
+- **Rebuilding is heavy:** tagging needs Ollama (about 20 hours) and embedding wants a GPU. No prebuilt database is published yet (the download mechanism exists: see Docker below).
 
 ## Run it
+
+### With Docker
+
+The image bundles the frontend, the API (gunicorn) and the embedding model; the 1.2 GB database is not baked in.
+
+```bash
+cp .env.example .env              # set SG_DB_URL and SG_DB_SHA256 (where a prebuilt database is published)
+docker compose up --build         # http://localhost:8000, the database is downloaded on first start
+
+# or, with a database you already have:
+docker build -t semantic-grooves .
+docker run -p 8000:8000 -v "$PWD/data:/data:ro" semantic-grooves     # ./data/database.sqlite
+```
+
+It runs on CPU and needs roughly 2 GB of RAM (a worker measured 1.7 GB). `/api/health` returns 200 once the database opens. A database built here is in WAL mode, which cannot be opened from a read-only mount (`:ro`): run `sg prepare-db` on it first, which also switches it to the default journal (`/api/health` says so if you forget). The same step is the start of publishing one: after it, run `sha256sum database.sqlite`, upload the file anywhere that serves it over HTTP, and give people the URL and the hash. The download is verified against the hash and checked for the expected tables before it replaces anything.
+
+### From source
 
 ```bash
 uv sync --extra dev --extra build        # or: pip install -e '.[dev,build]'   (Python 3.10+)
 sg serve                                 # API on :5000, needs database.sqlite in the repo root (or SG_DB_PATH)
 sg search "warm and unhurried"           # same search from the terminal
-cd frontend && npm install && npm run dev    # UI on :3000
+cd frontend && npm install && npm run dev    # UI on :3000 (or `npm run build`, then `sg serve --static frontend/dist`)
 
-pytest                                   # 133 tests, no database, model or Ollama needed
+pytest                                   # 175 tests, no database, model or Ollama needed
 ```
 
-**Rebuild the database from scratch** (tagging alone takes about 20 hours: it ran at 0.25 reviews/s with `qwen2.5:7b` on an AMD GPU; needs [Ollama](https://ollama.com) running with `qwen2.5:7b` pulled):
+`uv sync` installs CPU-only torch on Linux. For a GPU, install the matching torch wheel yourself (for example `pip install torch --index-url https://download.pytorch.org/whl/rocm7.1`), or run `uv sync --no-sources` for the PyPI default.
+
+### Build the database from scratch
+
+Tagging alone takes about 20 hours: it ran at 0.25 reviews/s with `qwen2.5:7b` on an AMD GPU. It needs [Ollama](https://ollama.com) running with `qwen2.5:7b` pulled.
 
 ```bash
 sg fetch-data      # download the Pitchfork dataset from Kaggle (and remove its duplicate rows)
@@ -92,4 +113,14 @@ sg build-index     # embeddings + full-text index (incremental; --rebuild starts
 sg prepare-db      # upgrade an existing database: drop duplicate reviews and chunks, add indexes (safe to repeat)
 ```
 
-`POST /api/search {"query": "...", "top_n": 20, "k": 20}` returns `{"results": [{reviewid, artist, title, score, url, tags, relevance}], "max_relevance": 0.2731}`. `SG_DB_PATH` points at another database, and `SG_QUERY_PREFIX=""` disables the query prefix. `uv sync` installs the default PyPI torch; on ROCm or CPU-only machines install the matching torch wheel first.
+### API and settings
+
+`POST /api/search {"query": "...", "top_n": 20, "k": 20}` returns `{"results": [{reviewid, artist, title, score, url, tags, relevance}], "max_relevance": 0.2731}`.
+
+| Variable | Meaning |
+|---|---|
+| `SG_DB_PATH` | the database file (default `./database.sqlite`, `/data/database.sqlite` in Docker) |
+| `SG_DB_URL`, `SG_DB_SHA256` | where to download a prebuilt database, and its hash (`sg download-db`, and on first start in Docker) |
+| `SG_STATIC_DIR` | serve a built frontend from the API (set in Docker) |
+| `SG_DEVICE` | force the torch device, e.g. `cpu` |
+| `SG_QUERY_PREFIX` | the query instruction prefix; set it to an empty string to disable it |
